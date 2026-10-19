@@ -1,0 +1,23 @@
+# Runtime data and credentials must never be committed.
+.local/
+.env
+.env.*
+!.env.example
+config.json
+*.sqlite3
+*.sqlite3-*
+*.db
+*.log
+*.pem
+*.key
+id_ed25519*
+id_rsa*
+*.pub
+__pycache__/
+*.py[cod]
+.test-tmp/
+.venv/
+.coverage
+.pytest_cache/
+dist/
+.DS_Store

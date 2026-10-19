@@ -1,0 +1,11 @@
+{
+  "token": "PASTE_YOUR_BOT_TOKEN_HERE",
+  "chat_id": 0,
+  "user_id": 0,
+  "server_name": "ssh-server",
+  "language": "en",
+  "timezone": "UTC",
+  "ssh_ports": [22],
+  "geoip": false,
+  "protected": ["127.0.0.0/8", "::1/128", "198.51.100.10/32"]
+}

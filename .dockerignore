@@ -1,0 +1,7 @@
+.git
+.test-tmp
+__pycache__
+*.sqlite3*
+config.json
+.env*
+dist

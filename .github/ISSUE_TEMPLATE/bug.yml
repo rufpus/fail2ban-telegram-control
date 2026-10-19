@@ -1,0 +1,26 @@
+name: Bug report
+description: Report a reproducible problem without secrets or personal logs
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include bot tokens, SSH keys, real IPs, usernames, Telegram IDs, databases or private screenshots. See SECURITY.md."
+  - type: input
+    id: versions
+    attributes:
+      label: Ubuntu, Python and Fail2ban versions
+      placeholder: Ubuntu 24.04 / Python 3.12 / Fail2ban 1.0.2
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Use documentation addresses, for example 203.0.113.42.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true

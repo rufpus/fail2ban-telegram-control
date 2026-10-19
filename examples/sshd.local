@@ -1,0 +1,11 @@
+# For a NEW Fail2ban installation only. Do not overwrite an existing jail.
+[DEFAULT]
+bantime = 24h
+findtime = 1h
+maxretry = 3
+
+[sshd]
+enabled = true
+backend = systemd
+banaction = nftables
+port = ssh
