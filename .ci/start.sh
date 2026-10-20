@@ -4,7 +4,7 @@ mkdir -p /work
 cp -a /src/. /work/
 cd /work
 mkdir -p /run/sshd /run/fail2ban /opt/fail2ban-telegram-control/locales
-cp f2btelegram.py f2bmanage.py i18n.py /opt/fail2ban-telegram-control/
+cp f2bcore.py f2btelegram.py f2bmanage.py i18n.py /opt/fail2ban-telegram-control/
 cp locales/ru.json /opt/fail2ban-telegram-control/locales/
 cp telegram_action.py /etc/fail2ban/action.d/telegram_control.py
 touch /tmp/sshd-fixture.log

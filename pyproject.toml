@@ -8,7 +8,7 @@ select = ["E4", "E7", "E9", "F"]
 [tool.mypy]
 python_version = "3.12"
 platform = "linux"
-files = ["f2btelegram.py", "f2bmanage.py", "telegram_action.py", "setup_credentials.py", "installer.py", "i18n.py"]
+files = ["f2bcore.py", "f2btelegram.py", "f2bmanage.py", "telegram_action.py", "setup_credentials.py", "installer.py", "i18n.py"]
 check_untyped_defs = true
 warn_unused_ignores = true
 show_error_codes = true

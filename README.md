@@ -341,3 +341,10 @@ Development checks: `requirements-dev.txt` provides ruff, mypy and pytest-cov.
 CI enforces the rootless runtime line-coverage baseline of 65% (measured 65.12%
 on Windows; Linux also covers POSIX rollback). See CONTRIBUTING.md for scope
 and exact commands. No pip packages are needed by the installed service.
+
+The import boundary now has an import-safe `f2bcore.py` for constants and SQLite
+connections. Management imports worker services only at call time, so importing
+`f2bmanage` does not load the Telegram worker. The existing CLI delegates to the
+canonical worker module via normal Python imports; no `sys.modules` alias is used.
+This is a minimal top-level cycle removal. Runtime service coupling and the global
+`SETTINGS`/translation context remain intentionally unchanged.

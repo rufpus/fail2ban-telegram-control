@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Fail2ban Telegram worker. Python standard library only; secrets stay on server."""
 import argparse
-import contextlib
 import copy
 import datetime as dt
 import html
@@ -9,12 +8,9 @@ import ipaddress
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import secrets
 import socket
-import sys
-import sqlite3
 import subprocess
 import threading
 import time
@@ -22,43 +18,39 @@ import urllib.error
 import urllib.request
 from zoneinfo import ZoneInfo
 from i18n import tr, configure_language
-sys.modules.setdefault('f2btelegram', sys.modules[__name__])
-STATE = Path(os.environ.get('F2BT_STATE', '/var/lib/fail2ban-telegram-control'))
-CONFIG = Path(os.environ.get('F2BT_CONFIG', '/etc/fail2ban-telegram-control/config.json'))
+import f2bcore as core
+from f2bcore import (
+    STATE as STATE,
+    CONFIG as CONFIG,
+    LOCK as LOCK,
+    LOG as LOG,
+    DEFAULT_RETENTION_DAYS as DEFAULT_RETENTION_DAYS,
+    TELEGRAM_TEXT_LIMIT as TELEGRAM_TEXT_LIMIT,
+    OUTBOX_MAX_ATTEMPTS as OUTBOX_MAX_ATTEMPTS,
+    DEAD_LETTER_NOTICE_INTERVAL as DEAD_LETTER_NOTICE_INTERVAL,
+    CAPTURE_SETTLE_SECONDS as CAPTURE_SETTLE_SECONDS,
+    COMMAND_TIMEOUT_SECONDS as COMMAND_TIMEOUT_SECONDS,
+    MAINTENANCE_INTERVAL_SECONDS as MAINTENANCE_INTERVAL_SECONDS,
+    CONFIRMATION_TTL_SECONDS as CONFIRMATION_TTL_SECONDS,
+    OUTBOX_BACKOFF_MAX_SECONDS as OUTBOX_BACKOFF_MAX_SECONDS,
+    COMMAND_MAX_AGE_SECONDS as COMMAND_MAX_AGE_SECONDS,
+    MAX_BAN_SECONDS as MAX_BAN_SECONDS,
+    DEADLINE_GRACE_SECONDS as DEADLINE_GRACE_SECONDS,
+    CALLBACK_TEXT_LIMIT as CALLBACK_TEXT_LIMIT,
+    CAPTURE_LOG_LIMIT as CAPTURE_LOG_LIMIT,
+    TIME_TOLERANCE_SECONDS as TIME_TOLERANCE_SECONDS,
+    LOCAL_ADDRESS_CACHE_SECONDS as LOCAL_ADDRESS_CACHE_SECONDS,
+)
 DEFAULT_SETTINGS = {'language': 'en', 'timezone': 'UTC', 'ssh_ports': [22], 'geoip': False}
 SETTINGS = dict(DEFAULT_SETTINGS)
-LOCK = threading.RLock()
-LOG = logging.getLogger('fail2ban-telegram-control')
-# Optional systemd Environment override; the JSON configuration stays unchanged.
-DEFAULT_RETENTION_DAYS = 30
-TELEGRAM_TEXT_LIMIT = 4096  # Conservative bound including HTML markup, in UTF-16 units.
-OUTBOX_MAX_ATTEMPTS = 8  # Bound recovery traffic during a prolonged outage.
-DEAD_LETTER_NOTICE_INTERVAL = 300  # Aggregate owner warnings, at most once per five minutes.
-CAPTURE_SETTLE_SECONDS = 15  # Wait for asynchronous Fail2ban bantime increments.
-COMMAND_TIMEOUT_SECONDS = 15  # Bound local command execution.
-MAINTENANCE_INTERVAL_SECONDS = 15  # Reconcile state even without Telegram traffic.
-CONFIRMATION_TTL_SECONDS = 120  # Short-lived destructive-action confirmation.
-OUTBOX_BACKOFF_MAX_SECONDS = 300  # Upper retry delay during an outage.
-COMMAND_MAX_AGE_SECONDS = 300  # Reject commands delayed by Telegram outages.
-MAX_BAN_SECONDS = 35 * 86400  # Match the configured five-week safety cap.
-DEADLINE_GRACE_SECONDS = 1  # Allow clock movement across the Fail2ban socket.
-CALLBACK_TEXT_LIMIT = 190  # Leave room below Telegram's 200-character alert limit.
-CAPTURE_LOG_LIMIT = 12000  # Bound log storage per Fail2ban event.
-TIME_TOLERANCE_SECONDS = 0.01  # Ignore timestamp serialization round-off.
-LOCAL_ADDRESS_CACHE_SECONDS = 15  # Refresh alongside firewall reconciliation.
 _LOCAL_ADDRESS_LOCK = threading.Lock()
 _LOCAL_ADDRESS_CACHE = None
 _LOCAL_ADDRESS_EXPIRES: float = 0
 
-@contextlib.contextmanager
 def database():
-    con = sqlite3.connect(STATE / 'state.sqlite3', timeout=3)
-    con.row_factory = sqlite3.Row
-    try:
-        with con:
-            yield con
-    finally:
-        con.close()
+    # Keep the existing worker STATE override while sharing the connection implementation.
+    return core.database(STATE)
+
 
 def initialize():
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -631,4 +623,6 @@ def main():
     else:
         serve()
 if __name__ == '__main__':
-    main()
+    # Always execute the canonical module; no aliasing or second active worker state.
+    from f2btelegram import main as application_main
+    application_main()

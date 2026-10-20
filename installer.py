@@ -22,7 +22,7 @@ INCLUDE = Path('/etc/fail2ban/jail.d/zz-telegram-control-whitelist.local')
 BACKUPS = Path('/var/backups/fail2ban-telegram-control')
 SERVICE = 'fail2ban-telegram-control'
 MANIFEST = f.STATE / 'install-manifest.json'
-FILES = ('f2btelegram.py', 'f2bmanage.py', 'i18n.py', 'telegram_action.py',
+FILES = ('f2bcore.py', 'f2btelegram.py', 'f2bmanage.py', 'i18n.py', 'telegram_action.py',
          'setup_credentials.py', 'installer.py', 'install.sh', 'uninstall.sh',
          'fail2ban-telegram-control.service', 'locales/ru.json', 'LICENSE',
          'THIRD_PARTY_NOTICES.md', 'README.md', 'README.ru.md')

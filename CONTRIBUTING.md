@@ -38,7 +38,7 @@ python -m pytest --cov --cov-fail-under=65 --cov-report=term-missing -q
 
 These are development dependencies only; the installed service still uses stdlib
 and the system Fail2ban package. Ruff checks all Python files with E4/E7/E9/F.
-Mypy checks bodies in all six runtime modules targeting Linux; missing upstream
+Mypy checks bodies in all seven runtime modules targeting Linux; missing upstream
 Fail2ban stubs have specific, explained `type: ignore[import-not-found]` comments.
 The existing local HTML escaping lambda has a documented E731 exception to avoid
 rewriting the message template. No whole runtime module is excluded from typing.

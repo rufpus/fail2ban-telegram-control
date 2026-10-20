@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# Worker services are imported at call time; module imports depend only on the shared core.
 """Validated Telegram commands for the sshd jail; no shell command execution."""
 import html
 import ipaddress as ips
@@ -9,9 +10,9 @@ import socket
 import tempfile
 import threading
 import time
-import f2btelegram as f
+import f2bcore as core
 from i18n import tr
-MAXTIME = f.MAX_BAN_SECONDS
+MAXTIME = core.MAX_BAN_SECONDS
 ADMIN_LOCK = threading.RLock()
 AUDIT_RESULT_PREVIEW_LIMIT = 120  # Keep audit report pages within Telegram limits.
 HELP = '<b>SSH / Fail2ban control</b>\n/status — service and notification queue\n/bans [page] — active IP and /24 bans\n/ip IP — IP status, whitelist and history\n/ban IP [duration] — ban an IP (default: 24h)\n/unban IP — remove an individual IP ban\n/bansubnet NETWORK [duration] — ban a /24 after confirmation\n/unbansubnet NETWORK — unban a /24 after confirmation\n/extend ADDRESS 7d — set expiry to 7 days from now\n/extend ADDRESS +7d — add 7 days to the current expiry\n/whitelist [page] — persistent whitelist\n/whitelist add IP_OR_CIDR — whitelist and unban\n/whitelist del IP_OR_CIDR — remove an entry (does not ban)\n/audit [page] — administration audit log\n/help — this help\n\nDuration: an integer followed by s, m, h, d or w; 1 second to 5 weeks.\nExamples: <code>/ban 203.0.113.8 7d</code>, <code>/bansubnet 203.0.113.0/24 2d</code>.\nIP commands run immediately. Subnet changes require confirmation.\nWhitelist networks: /24–/32. Banned networks: /24 only, TCP/{ports} only.\nRepeating a ban does not change its expiry. /extend without + can shorten it.\nOnly the sshd jail is managed. /unban does not remove a subnet ban.\nTimes use the configured timezone. Access is limited to the configured owner.'
@@ -58,6 +59,7 @@ def action_ports(value):
 
 
 def verify_scope(cfg):
+    import f2btelegram as f
     actions = engine('get', 'sshd', 'actions')
     nft_actions = [name for name in actions if 'nftables' in name.lower()]
     if not nft_actions:
@@ -71,15 +73,18 @@ def verify_scope(cfg):
             raise RuntimeError(tr('sshd nftables action ports must match ssh_ports and use type=multiport. Update the jail and configuration, then run doctor.'))
 
 def whitelist_networks():
+    import f2btelegram as f
     with f.database() as db:
         return [r[0] for r in db.execute('SELECT network FROM whitelist ORDER BY network')]
 
 def baseline(cfg):
+    import f2btelegram as f
     with f.database() as db:
         row = db.execute("SELECT value FROM meta WHERE key='baseline_ignores'").fetchone()
     return sorted({str(ips.ip_network(n, strict=False)) for n in list(cfg['protected']) + (json.loads(row[0]) if row else [])})
 
 def protected_ip(cfg, ip):
+    import f2btelegram as f
     address = ips.IPv4Address(ip)
     networks = baseline(cfg) + whitelist_networks() + ['127.0.0.0/8'] + list(f.local_addresses())
     if any((address in ips.ip_network(n, strict=False) for n in networks)):
@@ -87,6 +92,7 @@ def protected_ip(cfg, ip):
 
 def sync_whitelist(cfg):
     """Persist a jail include under StateDirectory and reconcile runtime ignores."""
+    import f2btelegram as f
     with ADMIN_LOCK:
         state = snapshot()
         refresh_active_events(state)
@@ -127,6 +133,7 @@ def sync_whitelist(cfg):
             db.execute("INSERT OR REPLACE INTO meta VALUES ('applied_whitelist',?)", (json.dumps(desired),))
 
 def refresh_active_events(state):
+    import f2btelegram as f
     with f.database() as db:
         for row in state['bans']:
             seconds = row.get('duration')
@@ -156,11 +163,13 @@ def address(text, subnet=False, white=False):
     return str(ips.IPv4Address(text))
 
 def overlaps(target):
+    import f2btelegram as f
     net = ips.ip_network(target, strict=False)
     with f.database() as db:
         return [dict(r) for r in db.execute('SELECT * FROM subnets WHERE expires>?', (time.time(),)) if net.overlaps(ips.ip_network(r['network']))]
 
 def reply(text, keys=None):
+    import f2btelegram as f
     with f.database() as db:
         f.queue(db, text, keys)
 
@@ -168,6 +177,7 @@ def audit(db, cfg, payload, result):
     db.execute('INSERT INTO audit(happened,user_id,operation,target,result) VALUES (?,?,?,?,?)', (time.time(), cfg['user_id'], payload['op'], payload.get('target', ''), result))
 
 def new_deadline(now, spec, old=None):
+    import f2btelegram as f
     additive = spec.startswith('+')
     seconds = parse_seconds(spec[1:] if additive else spec)
     if additive and old is None:
@@ -179,6 +189,7 @@ def new_deadline(now, spec, old=None):
 
 def execute(cfg, opid, payload):
     """Absolute deadlines + durable intents make crash recovery idempotent."""
+    import f2btelegram as f
     with ADMIN_LOCK:
         with f.database() as db:
             previous = db.execute('SELECT * FROM admin_operations WHERE id=?', (opid,)).fetchone()
@@ -202,6 +213,7 @@ def execute(cfg, opid, payload):
         return result
 
 def apply(cfg, payload):
+    import f2btelegram as f
     op, target = (payload['op'], payload['target'])
     if op in ('ban', 'deadline'):
         verify_scope(cfg)
@@ -276,9 +288,11 @@ def apply(cfg, payload):
     raise ValueError(tr('Unknown operation.'))
 
 def end_text(expires):
+    import f2btelegram as f
     return tr('Permanent ban.') if expires is None else tr('Remaining: ') + f.duration(max(0, expires - time.time())) + tr('; until ') + f.stamp(expires) + '.'
 
 def request_confirmation(cfg, opid, payload, text):
+    import f2btelegram as f
     with f.database() as db:
         if db.execute('SELECT 1 FROM admin_operations WHERE id=?', (opid,)).fetchone():
             return
@@ -288,6 +302,7 @@ def request_confirmation(cfg, opid, payload, text):
         db.execute('INSERT INTO admin_operations VALUES (?,?,?,?,?)', (opid, json.dumps(payload), 'confirmation', tr('Confirmation requested.'), time.time()))
 
 def confirm(cfg, cb):
+    import f2btelegram as f
     msg = cb.get('message', {})
     if cb.get('from', {}).get('id') != cfg['user_id'] or msg.get('chat', {}).get('id') != cfg['chat_id']:
         return tr('Access denied.')
@@ -305,6 +320,7 @@ def confirm(cfg, cb):
         return result[:f.CALLBACK_TEXT_LIMIT]
 
 def report(cfg, command, args):
+    import f2btelegram as f
     state = snapshot()
     if command == '/status':
         with f.database() as db:
@@ -347,6 +363,7 @@ def report(cfg, command, args):
     return html.escape(title + tr(' — page {v1}/{v3}\n', v1=page, v3=pages) + ('\n'.join(entries[(page - 1) * 10:page * 10]) or tr('No entries.')) + (tr('\nNext: {v1} {v3}', v1=command, v3=page + 1) if page < pages else ''))
 
 def handle_message(cfg, msg):
+    import f2btelegram as f
     if msg.get('chat', {}).get('id') != cfg['chat_id'] or msg.get('from', {}).get('id') != cfg['user_id']:
         return
     if time.time() - msg.get('date', time.time()) > f.COMMAND_MAX_AGE_SECONDS:
@@ -439,6 +456,7 @@ def handle_message(cfg, msg):
                 f.LOG.exception('Command handling failed')
 
 def recover_operations(cfg):
+    import f2btelegram as f
     sync_whitelist(cfg)
     with f.database() as db:
         rows = db.execute("SELECT * FROM admin_operations WHERE status='pending' ORDER BY created").fetchall()
@@ -446,5 +464,6 @@ def recover_operations(cfg):
         execute(cfg, row['id'], json.loads(row['payload']))
 
 def register_commands(cfg):
+    import f2btelegram as f
     names = [('help', tr('Help and command examples')), ('status', tr('SSH protection status')), ('bans', tr('List bans: /bans 1')), ('ip', tr('Inspect an IP: /ip address')), ('ban', tr('Ban an IP: /ban address 24h')), ('unban', tr('Unban an IP: /unban address')), ('bansubnet', tr('Ban a /24: /bansubnet network 24h')), ('unbansubnet', tr('Unban a /24 after confirmation')), ('extend', tr('Set expiry: /extend address 7d or +7d')), ('whitelist', tr('Whitelist: add, del or list')), ('audit', tr('Audit log: /audit 1'))]
     f.api(cfg, 'setMyCommands', commands=[{'command': n, 'description': d} for n, d in names], scope={'type': 'chat', 'chat_id': cfg['chat_id']})

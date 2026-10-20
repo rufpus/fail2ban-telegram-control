@@ -4,6 +4,9 @@ import tempfile
 import copy
 import json
 import os
+import runpy
+import subprocess
+import sys
 import types
 from pathlib import Path
 import unittest
@@ -11,6 +14,7 @@ from unittest.mock import patch
 import f2btelegram as f
 import f2bmanage as m
 import i18n
+import f2bcore as core
 
 
 class FollowupTests(unittest.TestCase):
@@ -157,3 +161,31 @@ class FollowupTests(unittest.TestCase):
                     self.assertEqual(row['created'], 100 if had_status else 200)
                     self.assertIsNotNone(db.execute('SELECT created FROM geo').fetchone()[0])
                     self.assertEqual(int(db.execute("SELECT value FROM meta WHERE key='dead_letter_total'").fetchone()[0]), int(had_status))
+
+    def test_management_import_does_not_import_worker(self):
+        code = "import sys; import f2bmanage; assert 'f2bcore' in sys.modules; assert 'f2btelegram' not in sys.modules"
+        result = subprocess.run([sys.executable, '-c', code], cwd=Path(__file__).parent, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_cli_delegates_to_canonical_worker_without_replacing_globals(self):
+        settings, context = f.SETTINGS, i18n._CONTEXT
+        before = dict(settings)
+        with patch.object(f, 'main') as main:
+            runpy.run_path(f.__file__, run_name='__main__')
+        main.assert_called_once_with()
+        self.assertIs(sys.modules['f2btelegram'], f)
+        self.assertIs(f.SETTINGS, settings)
+        self.assertEqual(f.SETTINGS, before)
+        self.assertIs(i18n._CONTEXT, context)
+
+    def test_shared_database_and_original_cli_init(self):
+        with patch.object(core, 'database', wraps=core.database) as connect:
+            with f.database() as db:
+                self.assertEqual(db.execute('SELECT 1').fetchone()[0], 1)
+            connect.assert_called_once_with(f.STATE)
+        state = Path(self.temp.name) / 'cli-state'
+        result = subprocess.run([sys.executable, str(Path(f.__file__)), 'init'],
+                                cwd=Path(__file__).parent, env={**os.environ,'F2BT_STATE':str(state)},
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((state / 'state.sqlite3').exists())
