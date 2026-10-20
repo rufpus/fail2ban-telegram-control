@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 """Real Fail2ban/nftables tests, only in the disposable CI container."""
-import json
 from pathlib import Path
 import subprocess
 import sys

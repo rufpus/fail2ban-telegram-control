@@ -48,7 +48,7 @@ TIME_TOLERANCE_SECONDS = 0.01  # Ignore timestamp serialization round-off.
 LOCAL_ADDRESS_CACHE_SECONDS = 15  # Refresh alongside firewall reconciliation.
 _LOCAL_ADDRESS_LOCK = threading.Lock()
 _LOCAL_ADDRESS_CACHE = None
-_LOCAL_ADDRESS_EXPIRES = 0
+_LOCAL_ADDRESS_EXPIRES: float = 0
 
 @contextlib.contextmanager
 def database():
@@ -144,13 +144,13 @@ def validate_config(cfg):
         raise ValueError('server_name must be a string of 1–100 characters')
     return cfg
 
-def validate_token(token):
+def validate_token(token: object) -> None:
     # BotFather tokens: positive ASCII bot ID and a 35-character URL-safe secret.
     # getMe during setup additionally verifies that Telegram actually issued it.
     if not isinstance(token, str) or not re.fullmatch(r'[1-9][0-9]*:[A-Za-z0-9_-]{35}', token):
         raise ValueError('Invalid Telegram token: paste the complete BotFather token (positive numeric ID, colon, 35 URL-safe characters).')
 
-def check_fail2ban_version(version, logger=LOG):
+def check_fail2ban_version(version: str, logger: logging.Logger = LOG) -> bool:
     """Warn outside the conservative patch-release range; runtime API guards decide safety."""
     match = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', str(version))
     compatible = bool(match and (1, 0, 2) <= tuple(map(int, match.groups())) < (1, 1, 0))
@@ -183,7 +183,7 @@ def api(cfg, method, **data):
     return body['result']
 
 def stamp(value):
-    return dt.datetime.fromtimestamp(value, ZoneInfo(SETTINGS['timezone'])).strftime('%Y-%m-%d %H:%M:%S %Z')
+    return dt.datetime.fromtimestamp(value, ZoneInfo(str(SETTINGS['timezone']))).strftime('%Y-%m-%d %H:%M:%S %Z')
 
 def duration(seconds):
     if seconds < 0:
@@ -228,7 +228,7 @@ def geodata(ip):
         return {}
     data, ttl = ({}, 3600)
     try:
-        url = 'https://ipwho.is/' + str(ipaddress.IPv4Address(ip)) + '?fields=success,country,country_code,connection&lang=' + SETTINGS['language']
+        url = 'https://ipwho.is/' + str(ipaddress.IPv4Address(ip)) + '?fields=success,country,country_code,connection&lang=' + str(SETTINGS['language'])
         with urllib.request.urlopen(url, timeout=4) as res:
             body = json.load(res)
         if body.get('success'):
@@ -288,7 +288,7 @@ def render_event(db, row, cfg, geo):
     live = row['ended'] is None and end > time.time()
     history = tr('yes, {v1}; previous ban: {v3}', v1=row['previous_count'], v3=stamp(row['previous_time'])) if row['previous_count'] else tr('no records since this integration was installed')
     installed = float(db.execute("SELECT value FROM meta WHERE key='installed'").fetchone()[0])
-    e = lambda x: html.escape(clean(x, 800))
+    e = lambda x: html.escape(clean(x, 800))  # noqa: E731 -- Local escape shorthand keeps the existing message template intact.
     lines = [tr('<b>SSH: IP banned</b>') if live else tr('<b>SSH: past IP ban</b>'), tr('Server: {v1}', v1=e(cfg.get('server_name', socket.gethostname()))), f'IP: <code>{e(row["ip"])}</code>', f'Jail: {e(row['jail'])}', tr('Started: {v1}', v1=stamp(row['started'])), tr('Duration: {v1}', v1=duration(row['duration'])), tr('Ends: ') + (stamp(end) if end != float('inf') else tr('permanent')), tr('Attempts in the Fail2ban event: {v1}', v1=e(row['failures'])), tr('Reason: {v1}', v1=e(reason(row['matches']))), tr('Previously: {v1}', v1=history), tr('History recorded since {v1}', v1=stamp(installed)), tr('Country: {v1}', v1=e(geo.get('country', tr('no data')))), tr('ISP: {v1}', v1=e(geo.get('connection', {}).get('isp') or tr('no data')))]
     if row['matches']:
         lines.append(tr('Log excerpts:\n<pre>') + html.escape('\n'.join((clean(x, 400) for x in row['matches'].splitlines()[-3:]))) + '</pre>')
@@ -477,7 +477,7 @@ def callback(cfg, cb):
         except ValueError as exc:
             return str(exc)[:CALLBACK_TEXT_LIMIT]
 
-def should_retry_delivery(exc, attempts):
+def should_retry_delivery(exc: Exception, attempts: int) -> bool:
     """Pure classification; attempts counts already completed failed attempts."""
     transient = isinstance(exc, APIError) and (exc.code == 'network' or isinstance(exc.code, int) and 500 <= exc.code < 600)
     return transient and attempts + 1 < OUTBOX_MAX_ATTEMPTS
@@ -540,7 +540,7 @@ def maintenance(cfg):
                     queue(db, tr('The ban on subnet <code>{v1}</code> expired and was removed.', v1=html.escape(row['network'])))
                 db.execute('DELETE FROM buttons WHERE (expires IS NOT NULL AND expires<?) OR used=1', (time.time() - 86400,))
             last_error = None
-        except Exception as exc:
+        except Exception:
             LOG.exception('Firewall maintenance failed')
             if last_error is None:
                 with database() as db:
@@ -552,7 +552,7 @@ def sender(cfg):
     while True:
         try:
             delivered = deliver_one(cfg)
-        except Exception as exc:
+        except Exception:
             LOG.exception('Outbox processing failed')
             delivered = False
         time.sleep(1.1 if delivered else 3)
@@ -594,7 +594,7 @@ def serve():
                 if cb:
                     try:
                         text = callback(cfg, cb)
-                    except Exception as exc:
+                    except Exception:
                         LOG.exception('Callback failed')
                         text = tr('Operation failed. Check the service on the server.')
                         with database() as db:

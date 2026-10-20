@@ -54,10 +54,14 @@ class PublicTests(unittest.TestCase):
 
     def test_ip_mutations_reject_mismatched_firewall_ports(self):
         def engine(*args):
-            if args[-1]=='actions': return ['nftables','telegram_control']
-            if args[-1]=='actionstart': return 'tcp dport <port>'
-            if args[-1]=='protocol': return 'tcp'
-            if args[-1]=='port': return 'ssh'
+            if args[-1]=='actions':
+                return ['nftables','telegram_control']
+            if args[-1]=='actionstart':
+                return 'tcp dport <port>'
+            if args[-1]=='protocol':
+                return 'tcp'
+            if args[-1]=='port':
+                return 'ssh'
         with patch.object(m,'engine',side_effect=engine):
             m.verify_scope(valid_cfg()|{'ssh_ports':[22]})
             with self.assertRaises(RuntimeError):
@@ -91,7 +95,8 @@ class PublicTests(unittest.TestCase):
 
     def test_catalogue_preserves_template_fields(self):
         formatter=string.Formatter()
-        fields=lambda s:{field for _,field,_,_ in formatter.parse(s) if field is not None}
+        def fields(s):
+            return {field for _,field,_,_ in formatter.parse(s) if field is not None}
         for en,ru in i18n._RU.items():
             self.assertEqual(fields(en),fields(ru),en)
 
@@ -109,7 +114,8 @@ class PublicTests(unittest.TestCase):
         cfg=valid_cfg()|{'ssh_ports':[2222,2200]}
         commands=[]
         def run(args,input_text=None):
-            if args[0]=='ip': return '[]'
+            if args[0]=='ip':
+                return '[]'
             commands.append(input_text)
             return ''
         with patch.object(f,'run',side_effect=run), patch.object(f,'nft_state',return_value=None):

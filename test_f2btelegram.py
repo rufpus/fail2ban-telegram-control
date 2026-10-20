@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: MIT
-import json
 from pathlib import Path
 import tempfile
 import threading

@@ -4,7 +4,6 @@ import html
 import ipaddress as ips
 import json
 import os
-from pathlib import Path
 import re
 import socket
 import tempfile
@@ -18,7 +17,7 @@ AUDIT_RESULT_PREVIEW_LIMIT = 120  # Keep audit report pages within Telegram limi
 HELP = '<b>SSH / Fail2ban control</b>\n/status — service and notification queue\n/bans [page] — active IP and /24 bans\n/ip IP — IP status, whitelist and history\n/ban IP [duration] — ban an IP (default: 24h)\n/unban IP — remove an individual IP ban\n/bansubnet NETWORK [duration] — ban a /24 after confirmation\n/unbansubnet NETWORK — unban a /24 after confirmation\n/extend ADDRESS 7d — set expiry to 7 days from now\n/extend ADDRESS +7d — add 7 days to the current expiry\n/whitelist [page] — persistent whitelist\n/whitelist add IP_OR_CIDR — whitelist and unban\n/whitelist del IP_OR_CIDR — remove an entry (does not ban)\n/audit [page] — administration audit log\n/help — this help\n\nDuration: an integer followed by s, m, h, d or w; 1 second to 5 weeks.\nExamples: <code>/ban 203.0.113.8 7d</code>, <code>/bansubnet 203.0.113.0/24 2d</code>.\nIP commands run immediately. Subnet changes require confirmation.\nWhitelist networks: /24–/32. Banned networks: /24 only, TCP/{ports} only.\nRepeating a ban does not change its expiry. /extend without + can shorten it.\nOnly the sshd jail is managed. /unban does not remove a subnet ban.\nTimes use the configured timezone. Access is limited to the configured owner.'
 
 def engine(*args):
-    from fail2ban.client.csocket import CSocket
+    from fail2ban.client.csocket import CSocket  # type: ignore[import-not-found]  # Linux system package; no upstream typing stubs.
     sock = CSocket(timeout=12)
     try:
         result = sock.send(list(args))

@@ -5,7 +5,7 @@ import ipaddress
 import threading
 import time
 sys.path.insert(0, '/opt/fail2ban-telegram-control')
-from fail2ban.server.action import ActionBase
+from fail2ban.server.action import ActionBase  # type: ignore[import-not-found]  # Untyped Linux Fail2ban private API; guarded at runtime.
 from f2btelegram import capture, MAX_BAN_SECONDS, DEADLINE_GRACE_SECONDS, check_fail2ban_version
 
 
@@ -36,7 +36,7 @@ class Action(ActionBase):
         return {'bans': bans, 'ignored': [str(i) for i in self._jail.filter.getIgnoreIP()]}
 
     def manage(self, operation, ip, deadline=None):
-        from fail2ban.version import version
+        from fail2ban.version import version  # type: ignore[import-not-found]  # Untyped Linux Fail2ban private API; guarded at runtime.
         if getattr(self, '_checked_version', None) != version:
             check_fail2ban_version(version, self._logSys)
             self._checked_version = version
@@ -59,8 +59,8 @@ class Action(ActionBase):
 
     def _manage(self, operation, ip, deadline=None):
         """Only exact IPv4 bans; never change the jail's global bantime."""
-        from fail2ban.server.ticket import BanTicket
-        from fail2ban.server.ipdns import IPAddr
+        from fail2ban.server.ticket import BanTicket  # type: ignore[import-not-found]  # Untyped Linux Fail2ban private API; guarded at runtime.
+        from fail2ban.server.ipdns import IPAddr  # type: ignore[import-not-found]  # Untyped Linux Fail2ban private API; guarded at runtime.
         ip = str(ipaddress.IPv4Address(ip))
         if self._jail.name != 'sshd' or operation not in ('ban', 'unban', 'deadline'):
             raise ValueError('Unsupported operation')

@@ -4,11 +4,10 @@
 import ipaddress
 from pathlib import Path
 import re
-import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP = {'.git', '.test-tmp', '__pycache__', '.venv', '.pytest_cache'}
+SKIP = {'.git', '.test-tmp', '__pycache__', '.venv', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.coverage'}
 ALLOWED_IPS = tuple(ipaddress.ip_network(n) for n in (
     '192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24',
     '198.18.0.0/15', '127.0.0.0/8', '0.0.0.0/32'))

@@ -1,0 +1,29 @@
+[tool.ruff]
+target-version = "py312"
+extend-exclude = [".test-tmp"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.mypy]
+python_version = "3.12"
+platform = "linux"
+files = ["f2btelegram.py", "f2bmanage.py", "telegram_action.py", "setup_credentials.py", "installer.py", "i18n.py"]
+check_untyped_defs = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]
+norecursedirs = [".git", ".venv", ".test-tmp", "tools", ".ci"]
+
+[tool.coverage.run]
+source = ["."]
+omit = ["test_*.py", "tools/*", ".ci/*", ".venv/*", ".test-tmp/*"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+# Measured rootless baseline: 65.12% on Windows (POSIX rollback adds coverage on Linux).
+fail_under = 65

@@ -5,7 +5,6 @@ import getpass
 import ipaddress
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 from zoneinfo import ZoneInfo

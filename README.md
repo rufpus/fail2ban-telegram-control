@@ -336,3 +336,8 @@ state, then repeat `/extend IP DURATION` if still banned, or explicitly `/ban IP
 DURATION` if needed. `/extend IP +DURATION` adds to the currently live deadline.
 Own `/24` bans are different: their deadlines are persisted in the integration's
 SQLite database and reconciled with nftables after a worker restart.
+
+Development checks: `requirements-dev.txt` provides ruff, mypy and pytest-cov.
+CI enforces the rootless runtime line-coverage baseline of 65% (measured 65.12%
+on Windows; Linux also covers POSIX rollback). See CONTRIBUTING.md for scope
+and exact commands. No pip packages are needed by the installed service.

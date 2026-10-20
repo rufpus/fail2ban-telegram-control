@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 """ExecStartPre probe: run inside the production unit's actual systemd sandbox."""
-from pathlib import Path
 import f2btelegram as f
 import f2bmanage as m
 
