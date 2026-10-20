@@ -249,7 +249,7 @@ def apply(cfg, payload):
             f.nft_sync(db, cfg)
             keys = [[f.button(db, 'request_unban', target, tr('Unban ') + target)]] if op != 'subnet_unban' else None
             if keys:
-                f.queue(db, tr('Subnet controls for <code>') + target + '</code>:', keys)
+                f.queue(db, tr('Subnet controls for <code>') + html.escape(target) + '</code>:', keys)
         if op == 'subnet_unban':
             return tr('Ban on subnet ') + target + tr(' was removed. Individual IP bans remain.')
         old = tr('\nPrevious expiry: ') + f.stamp(row['expires']) if row and op == 'subnet_deadline' else ''

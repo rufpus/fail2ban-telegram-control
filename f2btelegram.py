@@ -238,7 +238,7 @@ def render_event(db, row, cfg, geo):
     history = tr('yes, {v1}; previous ban: {v3}', v1=row['previous_count'], v3=stamp(row['previous_time'])) if row['previous_count'] else tr('no records since this integration was installed')
     installed = float(db.execute("SELECT value FROM meta WHERE key='installed'").fetchone()[0])
     e = lambda x: html.escape(clean(x, 800))
-    lines = [tr('<b>SSH: IP banned</b>') if live else tr('<b>SSH: past IP ban</b>'), tr('Server: {v1}', v1=e(cfg.get('server_name', socket.gethostname()))), f'IP: <code>{row['ip']}</code>', f'Jail: {e(row['jail'])}', tr('Started: {v1}', v1=stamp(row['started'])), tr('Duration: {v1}', v1=duration(row['duration'])), tr('Ends: ') + (stamp(end) if end != float('inf') else tr('permanent')), tr('Attempts in the Fail2ban event: {v1}', v1=row['failures']), tr('Reason: {v1}', v1=e(reason(row['matches']))), tr('Previously: {v1}', v1=history), tr('History recorded since {v1}', v1=stamp(installed)), tr('Country: {v1}', v1=e(geo.get('country', tr('no data')))), tr('ISP: {v1}', v1=e(geo.get('connection', {}).get('isp') or tr('no data')))]
+    lines = [tr('<b>SSH: IP banned</b>') if live else tr('<b>SSH: past IP ban</b>'), tr('Server: {v1}', v1=e(cfg.get('server_name', socket.gethostname()))), f'IP: <code>{e(row["ip"])}</code>', f'Jail: {e(row['jail'])}', tr('Started: {v1}', v1=stamp(row['started'])), tr('Duration: {v1}', v1=duration(row['duration'])), tr('Ends: ') + (stamp(end) if end != float('inf') else tr('permanent')), tr('Attempts in the Fail2ban event: {v1}', v1=e(row['failures'])), tr('Reason: {v1}', v1=e(reason(row['matches']))), tr('Previously: {v1}', v1=history), tr('History recorded since {v1}', v1=stamp(installed)), tr('Country: {v1}', v1=e(geo.get('country', tr('no data')))), tr('ISP: {v1}', v1=e(geo.get('connection', {}).get('isp') or tr('no data')))]
     if row['matches']:
         lines.append(tr('Log excerpts:\n<pre>') + html.escape('\n'.join((clean(x, 400) for x in row['matches'].splitlines()[-3:]))) + '</pre>')
     else:
@@ -327,7 +327,7 @@ def callback(cfg, cb):
                 action = 'ban' if kind == 'request_ban' else 'unban'
                 expires = time.time() + 120
                 keys = [[button(db, 'confirm_' + action, net, tr('Confirm'), item['event_id'], expires), button(db, 'cancel', net, tr('Cancel'), expires=expires)]]
-                text = tr('Confirm banning <code>{v1}</code> for 24 hours, TCP/{ports} only.', v1=net) if action == 'ban' else tr('Confirm unbanning <code>{v1}</code>. Individual IP bans will remain.', v1=net)
+                text = tr('Confirm banning <code>{v1}</code> for 24 hours, TCP/{ports} only.', v1=html.escape(net)) if action == 'ban' else tr('Confirm unbanning <code>{v1}</code>. Individual IP bans will remain.', v1=html.escape(net))
                 queue(db, text + tr('\nThis confirmation expires in 2 minutes.'), keys)
                 return tr('A confirmation was queued as a separate message.')
             if kind == 'confirm_ban':
@@ -335,11 +335,11 @@ def callback(cfg, cb):
                 db.execute('INSERT OR REPLACE INTO subnets VALUES (?,?,?)', (net, now, now + 86400))
                 nft_sync(db, cfg)
                 keys = [[button(db, 'request_unban', net, tr('Unban ') + net)]]
-                queue(db, tr('Subnet <code>{v1}</code> is banned on TCP/{ports}.\nUntil {v3}.', v1=net, v3=stamp(now + 86400)), keys)
+                queue(db, tr('Subnet <code>{v1}</code> is banned on TCP/{ports}.\nUntil {v3}.', v1=html.escape(net), v3=stamp(now + 86400)), keys)
             elif kind == 'confirm_unban':
                 db.execute('DELETE FROM subnets WHERE network=?', (net,))
                 nft_sync(db, cfg)
-                queue(db, tr('Subnet <code>{v1}</code> was unbanned. Individual IP bans remain.', v1=net))
+                queue(db, tr('Subnet <code>{v1}</code> was unbanned. Individual IP bans remain.', v1=html.escape(net)))
             else:
                 return tr('Unknown action.')
             db.execute('UPDATE buttons SET used=1 WHERE message_id=?', (item['message_id'],))
@@ -397,7 +397,7 @@ def maintenance(cfg):
                 db.execute('DELETE FROM subnets WHERE expires<=?', (time.time(),))
                 nft_sync(db, cfg)
                 for row in expired:
-                    queue(db, tr('The ban on subnet <code>{v1}</code> expired and was removed.', v1=row['network']))
+                    queue(db, tr('The ban on subnet <code>{v1}</code> expired and was removed.', v1=html.escape(row['network'])))
                 db.execute('DELETE FROM buttons WHERE (expires IS NOT NULL AND expires<?) OR used=1', (time.time() - 86400,))
                 prune_data(db)
             last_error = None

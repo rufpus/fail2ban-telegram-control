@@ -86,6 +86,26 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT count(*) FROM outbox').fetchone()[0], 0)
             f.queue(db, 'x'*4096)
 
+    def test_event_dynamic_values_are_html_escaped(self):
+        f.capture('<jail&>', dict(ip='198.18.0.42',time=time.time()-60,bantime=1,matches='<log&>'))
+        with f.database() as db:
+            db.execute("UPDATE events SET ip='<ip&>', failures='<count&>'")
+            row = db.execute('SELECT * FROM events').fetchone()
+            text, _ = f.render_event(db, row, {'server_name':'<server&>'}, {'country':'<country&>','connection':{'isp':'<isp&>'}})
+            f.queue(db, text)
+            for value in ('ip','jail','count','log','server','country','isp'):
+                self.assertNotIn('<'+value+'&>', text)
+                self.assertIn('&lt;'+value+'&amp;&gt;', text)
+            self.assertIn('<code>&lt;ip&amp;&gt;</code>', text)
+
+    def test_command_error_is_escaped_before_outbox(self):
+        msg = dict(message_id=1,date=time.time(),text='/ban <b>&',chat={'id':123}, **{'from':{'id':123}})
+        m.handle_message(self.cfg, msg)
+        with f.database() as db:
+            text = db.execute('SELECT text FROM outbox').fetchone()[0]
+        self.assertNotIn('<b>', text)
+        self.assertIn('&lt;b&gt;&amp;', text)
+
     def test_permanent_error_dead_letters_without_blocking_next_message(self):
         with f.database() as db:
             f.queue(db, 'bad')
@@ -113,3 +133,4 @@ class AuditTests(unittest.TestCase):
                         db.execute('UPDATE outbox SET ready=0')
                 self.assertFalse(f.deliver_one(self.cfg))
                 self.assertEqual(api.call_count, f.OUTBOX_MAX_ATTEMPTS)
+
