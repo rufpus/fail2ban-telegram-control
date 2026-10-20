@@ -183,6 +183,8 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(api.call_count, 2)
         with f.database() as db:
             self.assertEqual([r[0] for r in db.execute('SELECT status FROM outbox ORDER BY id')], ['failed','sent'])
+        with patch.object(m, 'snapshot', return_value={'bans':[], 'ignored':[]}):
+            self.assertIn('Queued notifications: 0.', m.report(self.cfg, '/status', []))
 
     def test_transient_errors_back_off_and_exhaust_attempts(self):
         for code in ('network', 503):
@@ -199,4 +201,3 @@ class AuditTests(unittest.TestCase):
                         db.execute('UPDATE outbox SET ready=0')
                 self.assertFalse(f.deliver_one(self.cfg))
                 self.assertEqual(api.call_count, f.OUTBOX_MAX_ATTEMPTS)
-

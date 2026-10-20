@@ -309,7 +309,7 @@ def report(cfg, command, args):
     state = snapshot()
     if command == '/status':
         with f.database() as db:
-            pending = db.execute('SELECT count(*) FROM outbox WHERE sent IS NULL').fetchone()[0]
+            pending = db.execute("SELECT count(*) FROM outbox WHERE sent IS NULL AND status='pending'").fetchone()[0]
             networks = db.execute('SELECT count(*) FROM subnets WHERE expires>?', (time.time(),)).fetchone()[0]
         return tr('Bot is running. Jail: sshd. SSH: TCP/{ports}.\nBanned IPs: {v1}. Subnets: {v3}.\nQueued notifications: {v5}.\nHelp: /help', v1=len(state['bans']), v3=networks, v5=pending)
     if command == '/ip':
