@@ -82,10 +82,7 @@ def baseline(cfg):
 
 def protected_ip(cfg, ip):
     address = ips.IPv4Address(ip)
-    networks = baseline(cfg) + whitelist_networks() + ['127.0.0.0/8']
-    local = json.loads(f.run(['ip', '-j', '-4', 'addr', 'show']))
-    for interface in local:
-        networks.extend((a['local'] + '/32' for a in interface.get('addr_info', [])))
+    networks = baseline(cfg) + whitelist_networks() + ['127.0.0.0/8'] + list(f.local_addresses())
     if any((address in ips.ip_network(n, strict=False) for n in networks)):
         raise ValueError(tr('This IP is protected or whitelisted. Banning it is not allowed.'))
 

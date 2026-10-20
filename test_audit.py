@@ -78,6 +78,20 @@ class AuditTests(unittest.TestCase):
         action._jail.database.addBan.assert_not_called()
         action._jail.actions._prolongBan.assert_called_once()
 
+    def test_local_address_cache_is_shared_expires_and_fails_closed(self):
+        output = json.dumps([{'addr_info':[{'local':'192.0.2.10'}]}])
+        with patch.object(f, '_LOCAL_ADDRESS_CACHE', None), patch.object(f, '_LOCAL_ADDRESS_EXPIRES', 0), patch.object(f.time, 'monotonic', return_value=100) as clock, patch.object(f, 'run', return_value=output) as run:
+            with self.assertRaises(ValueError):
+                m.protected_ip(self.cfg, '192.0.2.10')
+            with self.assertRaises(ValueError):
+                f.safe_network(self.cfg, '192.0.2.0/24')
+            self.assertEqual(run.call_count, 1)
+            clock.return_value = 100+f.LOCAL_ADDRESS_CACHE_SECONDS
+            run.side_effect = RuntimeError('ip command failed')
+            with self.assertRaisesRegex(RuntimeError, 'ip command failed'):
+                f.local_addresses()
+            self.assertEqual(run.call_count, 2)
+
     def test_outbox_rejects_oversize_before_insert(self):
         with f.database() as db:
             for text in ('x'*4097, '\U0001f600'*2049):

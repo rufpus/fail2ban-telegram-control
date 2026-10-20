@@ -43,6 +43,10 @@ DEADLINE_GRACE_SECONDS = 1  # Allow clock movement across the Fail2ban socket.
 CALLBACK_TEXT_LIMIT = 190  # Leave room below Telegram's 200-character alert limit.
 CAPTURE_LOG_LIMIT = 12000  # Bound log storage per Fail2ban event.
 TIME_TOLERANCE_SECONDS = 0.01  # Ignore timestamp serialization round-off.
+LOCAL_ADDRESS_CACHE_SECONDS = 15  # Refresh alongside firewall reconciliation.
+_LOCAL_ADDRESS_LOCK = threading.Lock()
+_LOCAL_ADDRESS_CACHE = None
+_LOCAL_ADDRESS_EXPIRES = 0
 
 @contextlib.contextmanager
 def database():
@@ -267,15 +271,25 @@ def render_event(db, row, cfg, geo):
         keys = [[button(db, 'request_ban', network, tr('Ban ') + network, row['id'])]]
     return ('\n'.join(lines), keys)
 
+def local_addresses():
+    """Share one bounded cache; failed refreshes fail closed, never return stale data."""
+    global _LOCAL_ADDRESS_CACHE, _LOCAL_ADDRESS_EXPIRES
+    with _LOCAL_ADDRESS_LOCK:
+        now = time.monotonic()
+        if _LOCAL_ADDRESS_CACHE is None or now >= _LOCAL_ADDRESS_EXPIRES:
+            interfaces = json.loads(run(['ip', '-j', '-4', 'addr', 'show']))
+            addresses = tuple(str(ipaddress.IPv4Address(a['local'])) + '/32'
+                              for interface in interfaces for a in interface.get('addr_info', []))
+            _LOCAL_ADDRESS_CACHE = addresses
+            _LOCAL_ADDRESS_EXPIRES = now + LOCAL_ADDRESS_CACHE_SECONDS
+        return _LOCAL_ADDRESS_CACHE
+
 def safe_network(cfg, network):
     from f2bmanage import whitelist_networks, baseline
     net = ipaddress.IPv4Network(network, strict=True)
     if net.prefixlen != 24:
         raise ValueError(tr('Only IPv4 /24 subnets are supported.'))
-    local = json.loads(run(['ip', '-j', '-4', 'addr', 'show']))
-    protected = baseline(cfg) + whitelist_networks() + ['127.0.0.0/8']
-    for interface in local:
-        protected.extend((a['local'] + '/32' for a in interface.get('addr_info', [])))
+    protected = baseline(cfg) + whitelist_networks() + ['127.0.0.0/8'] + list(local_addresses())
     for item in protected:
         other = ipaddress.ip_network(item, strict=False)
         if other.version == 4 and net.overlaps(other):
