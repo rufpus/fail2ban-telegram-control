@@ -41,7 +41,7 @@ Telegram account or an official Telegram client.*
 | Telegram | One dedicated bot, one private chat, one owner |
 
 Per-IP mutations use version-specific Fail2ban APIs. Untested Fail2ban versions
-are rejected; other distributions and firewall backends are not advertised as
+outside >=1.0.2,<1.1.0 produce a warning and require runtime API checks; other distributions and firewall backends are not advertised as
 supported. Existing IPv6 protection remains with Fail2ban, but this bot does not
 notify about or administer IPv6 bans.
 

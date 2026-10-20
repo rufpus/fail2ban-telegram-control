@@ -142,6 +142,15 @@ def validate_token(token):
     if not isinstance(token, str) or not re.fullmatch(r'[1-9][0-9]*:[A-Za-z0-9_-]{35}', token):
         raise ValueError('Invalid Telegram token: paste the complete BotFather token (positive numeric ID, colon, 35 URL-safe characters).')
 
+def check_fail2ban_version(version, logger=LOG):
+    """Warn outside the conservative patch-release range; runtime API guards decide safety."""
+    match = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', str(version))
+    compatible = bool(match and (1, 0, 2) <= tuple(map(int, match.groups())) < (1, 1, 0))
+    if not compatible:
+        logger.warning('Fail2ban %s is outside the compatibility range >=1.0.2,<1.1.0; private API checks are required (tested: 1.0.2).', version)
+    # TODO: widen the range only after testing other releases, or keep a patch-only policy.
+    return compatible
+
 class APIError(Exception):
 
     def __init__(self, code, retry=0):

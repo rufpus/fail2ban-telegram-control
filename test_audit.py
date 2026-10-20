@@ -78,6 +78,18 @@ class AuditTests(unittest.TestCase):
         action._jail.database.addBan.assert_not_called()
         action._jail.actions._prolongBan.assert_called_once()
 
+    def test_version_range_warns_and_checks_private_api(self):
+        for version in ('1.0.2', '1.0.3', '1.1.0', 'unknown'):
+            action, modules = load_action(version)
+            with patch.dict(sys.modules, modules):
+                action.manage('deadline', '198.18.0.42', time.time()+3600)
+            self.assertEqual(action._logSys.warning.called, version in ('1.1.0','unknown'))
+        action, modules = load_action('1.1.0')
+        del action._jail.actions.banManager._BanManager__banList
+        with patch.dict(sys.modules, modules), self.assertRaisesRegex(RuntimeError, 'Fail2ban 1.1.0 private API unavailable'):
+            action.manage('deadline', '198.18.0.42', time.time()+3600)
+        action._jail.actions._prolongBan.assert_not_called()
+
     def test_local_address_cache_is_shared_expires_and_fails_closed(self):
         output = json.dumps([{'addr_info':[{'local':'192.0.2.10'}]}])
         with patch.object(f, '_LOCAL_ADDRESS_CACHE', None), patch.object(f, '_LOCAL_ADDRESS_EXPIRES', 0), patch.object(f.time, 'monotonic', return_value=100) as clock, patch.object(f, 'run', return_value=output) as run:

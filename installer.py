@@ -45,8 +45,7 @@ def verify_platform():
     if release.get('ID', '').strip('"') != 'ubuntu' or release.get('VERSION_ID', '').strip('"') != '24.04':
         raise RuntimeError('This release is tested only on Ubuntu 24.04 LTS.')
     version = call('fail2ban-client', 'version').stdout.strip().split()[-1]
-    if version != '1.0.2':
-        raise RuntimeError('This release requires Fail2ban 1.0.2; per-ticket APIs are version-specific.')
+    f.check_fail2ban_version(version)
 
 
 def preflight():

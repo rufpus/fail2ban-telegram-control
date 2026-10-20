@@ -48,6 +48,8 @@ private contact channel; do not post exploit details or secrets publicly.
 ## Compatibility boundary
 
 Per-IP expiry changes use private APIs of Fail2ban **1.0.2**. The installer and
-mutation bridge reject untested versions. Re-test compatibility before updating
+mutation bridge warn outside >=1.0.2,<1.1.0 and guard required private API
+attributes before mutations. Only 1.0.2 has integration coverage; the patch range
+is a compatibility policy, not a claim that other releases were tested. Re-test before updating
 Fail2ban or changing its firewall backend. Existing Fail2ban protection remains
 independent of Telegram delivery.
