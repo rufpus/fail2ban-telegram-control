@@ -305,26 +305,95 @@ def safe_network(cfg, network):
             raise ValueError(tr('The subnet overlaps a protected address or network: ') + item)
     return str(net)
 
+NFT_EXPIRY_TOLERANCE_SECONDS = 2  # nft JSON milliseconds and command latency.
+NFT_TABLE = 'inet f2b_telegram_control'  # Only the integration-owned table.
+
+def nft_state():
+    result = subprocess.run(['nft', '-j', 'list', 'table', 'inet', 'f2b_telegram_control'],
+                            capture_output=True, text=True, timeout=10)
+    if result.returncode:
+        if 'No such file or directory' in result.stderr:
+            return None
+        raise RuntimeError('Cannot read the owned nftables table: ' + result.stderr[-500:])
+    return json.loads(result.stdout)['nftables']
+
+def nft_element(value):
+    """Decode nft JSON prefix/element forms without accepting executable text."""
+    expires = None
+    if 'elem' in value:
+        value = value['elem']
+        expires = value.get('expires', value.get('timeout'))
+        value = value['val']
+    if isinstance(value, dict) and 'prefix' in value:
+        prefix = value['prefix']
+        value = str(prefix['addr']) + '/' + str(prefix['len'])
+    return str(ipaddress.IPv4Network(value, strict=True)), expires
+
+def nft_rule_matches(rule, ports):
+    expressions = [e for e in rule.get('expr', []) if 'counter' not in e]
+    for expression in expressions:
+        match = expression.get('match', {})
+        if match.get('left') == {'payload': {'protocol':'tcp', 'field':'dport'}}:
+            right = match.get('right')
+            values = right.get('set', []) if isinstance(right, dict) else [right]
+            match['right'] = {'set': sorted(values)}
+    return expressions == [
+        {'match': {'op':'==', 'left': {'payload': {'protocol':'tcp', 'field':'dport'}}, 'right': {'set':sorted(ports)}}},
+        {'match': {'op':'==', 'left': {'payload': {'protocol':'ip', 'field':'saddr'}}, 'right':'@subnets'}},
+        {'drop': None}]
+
 def nft_sync(db, cfg):
-    """An independent table; never flush or replace Fail2ban's own rules."""
+    """Read current kernel state and apply only the owned-table diff, atomically."""
     ports = cfg.get('ssh_ports', SETTINGS['ssh_ports'])
     if not ports or any(type(p) is not int or not 1 <= p <= 65535 for p in ports):
         raise ValueError('Invalid SSH port list')
-    check = subprocess.run(['nft', 'list', 'table', 'inet', 'f2b_telegram_control'], capture_output=True, timeout=10)
-    # nft applies the complete transaction atomically, including port changes.
-    preamble = 'delete table inet f2b_telegram_control\n' if check.returncode == 0 else ''
-    preamble += ('add table inet f2b_telegram_control\n'
-        'add chain inet f2b_telegram_control input { type filter hook input priority -2; policy accept; }\n'
-        'add set inet f2b_telegram_control subnets { type ipv4_addr; flags interval,timeout; }\n'
-        'add rule inet f2b_telegram_control input tcp dport { '+', '.join(map(str, ports))+' } ip saddr @subnets counter drop\n')
     now = time.time()
-    rows = db.execute('SELECT * FROM subnets WHERE expires>?', (now,)).fetchall()
-    commands = preamble
-    for row in rows:
-        net = safe_network(cfg, row['network'])
-        seconds = max(1, int(row['expires'] - now))
-        commands += f'add element inet f2b_telegram_control subnets {{ {net} timeout {seconds}s }}\n'
-    run(['nft', '-f', '-'], commands)
+    desired = {safe_network(cfg, r['network']): r['expires'] for r in
+               db.execute('SELECT * FROM subnets WHERE expires>?', (now,))}
+    # An element may expire between the read and delete; reread once on failure.
+    for attempt in range(2):
+        state = nft_state()
+        commands = []
+        if state is None:
+            state = []
+            commands.append('add table ' + NFT_TABLE)
+        chain = next((x['chain'] for x in state if 'chain' in x and x['chain']['name']=='input'), None)
+        netset = next((x['set'] for x in state if 'set' in x and x['set']['name']=='subnets'), None)
+        if chain is None:
+            commands.append('add chain ' + NFT_TABLE + ' input { type filter hook input priority -2; policy accept; }')
+        elif any(chain.get(k) != v for k,v in {'type':'filter','hook':'input','prio':-2,'policy':'accept'}.items()):
+            raise RuntimeError('Owned nftables input chain has an incompatible schema; inspect it before repair.')
+        if netset is None:
+            commands.append('add set ' + NFT_TABLE + ' subnets { type ipv4_addr; flags interval,timeout; }')
+        elif netset.get('type') != 'ipv4_addr' or not {'interval','timeout'} <= set(netset.get('flags', [])):
+            raise RuntimeError('Owned nftables subnet set has an incompatible schema; inspect it before repair.')
+        rules = [x['rule'] for x in state if 'rule' in x and x['rule']['chain']=='input']
+        if len(rules) != 1 or not nft_rule_matches(rules[0], ports):
+            for rule in rules:
+                commands.append('delete rule ' + NFT_TABLE + ' input handle ' + str(int(rule['handle'])))
+            commands.append('add rule ' + NFT_TABLE + ' input tcp dport { '+', '.join(map(str, ports))+' } ip saddr @subnets counter drop')
+        current = dict(nft_element(e) for e in (netset or {}).get('elem', []))
+        # Some nft versions emit element objects separately from the set declaration.
+        for item in state:
+            element = item.get('element', {})
+            if element.get('name') == 'subnets':
+                current.update(nft_element(e) for e in element.get('elem', []))
+        read_at = time.time()
+        changed = {net for net in current.keys() & desired.keys() if current[net] is None or
+                   abs(desired[net]-read_at-current[net]/1000) > NFT_EXPIRY_TOLERANCE_SECONDS}
+        for net in sorted((current.keys()-desired.keys()) | changed):
+            commands.append('delete element ' + NFT_TABLE + ' subnets { ' + net + ' }')
+        for net in sorted((desired.keys()-current.keys()) | changed):
+            seconds = max(1, int(desired[net]-time.time()))
+            commands.append('add element ' + NFT_TABLE + ' subnets { ' + net + ' timeout ' + str(seconds) + 's }')
+        if not commands:
+            return
+        try:
+            run(['nft', '-f', '-'], '\n'.join(commands)+'\n')
+            return
+        except subprocess.CalledProcessError:
+            if attempt:
+                raise
 
 def live_event(db, event_id):
     row = db.execute('SELECT * FROM events WHERE id=?', (event_id,)).fetchone()

@@ -104,6 +104,38 @@ class AuditTests(unittest.TestCase):
                 f.local_addresses()
             self.assertEqual(run.call_count, 2)
 
+    def test_nft_diff_preserves_unchanged_state_and_changes_only_elements(self):
+        state = [
+            {'chain':{'name':'input','type':'filter','hook':'input','prio':-2,'policy':'accept'}},
+            {'set':{'name':'subnets','type':'ipv4_addr','flags':['interval','timeout'],
+                    'elem':[{'elem':{'val':{'prefix':{'addr':'198.18.0.0','len':24}},'expires':3600000}}]}},
+            {'rule':{'chain':'input','handle':7,'expr':[
+                {'match':{'op':'==','left':{'payload':{'protocol':'tcp','field':'dport'}},'right':22}},
+                {'match':{'op':'==','left':{'payload':{'protocol':'ip','field':'saddr'}},'right':'@subnets'}},
+                {'counter':{'packets':123,'bytes':456}}, {'drop':None}]}}]
+        with patch.object(f, 'nft_state', return_value=state), patch.object(f, 'safe_network', side_effect=lambda cfg,net:net), patch.object(f, 'run') as run, patch.object(f.time, 'time', return_value=1000):
+            with f.database() as db:
+                db.execute('INSERT INTO subnets VALUES (?,?,?)', ('198.18.0.0/24',1000,4600))
+                f.nft_sync(db, self.cfg)
+                run.assert_not_called()
+                db.execute('UPDATE subnets SET expires=8200')
+                f.nft_sync(db, self.cfg)
+                commands = run.call_args.args[1]
+                self.assertIn('delete element', commands)
+                self.assertIn('timeout 7200s', commands)
+                self.assertNotIn('rule', commands)
+                self.assertNotIn('delete table', commands)
+                run.reset_mock()
+                db.execute('DELETE FROM subnets')
+                f.nft_sync(db, self.cfg)
+                self.assertEqual(run.call_args.args[1], 'delete element inet f2b_telegram_control subnets { 198.18.0.0/24 }\n')
+
+    def test_nft_read_failure_does_not_recreate_table(self):
+        with patch.object(f.subprocess, 'run', return_value=types.SimpleNamespace(returncode=1,stderr='Operation not permitted')), patch.object(f, 'run') as run:
+            with f.database() as db, self.assertRaisesRegex(RuntimeError, 'Cannot read'):
+                f.nft_sync(db, self.cfg)
+            run.assert_not_called()
+
     def test_outbox_rejects_oversize_before_insert(self):
         with f.database() as db:
             for text in ('x'*4097, '\U0001f600'*2049):

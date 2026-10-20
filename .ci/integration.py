@@ -69,6 +69,18 @@ assert not m.overlaps(ip)
 confirm()
 rules=f.run(['nft','list','table','inet','f2b_telegram_control'])
 assert 'tcp dport 2222' in rules and net in rules and 'timeout' in rules
+with f.database() as db:
+    # An unchanged reconciliation must preserve table/set/rule handles and counters.
+    from unittest.mock import patch
+    with patch.object(f, 'run', wraps=f.run) as applied:
+        f.nft_sync(db,cfg)
+        assert not any(call.args[0] == ['nft','-f','-'] for call in applied.call_args_list), applied.call_args_list
+    # Adjusting an active deadline must change the element, not rebuild the table.
+    original=f.nft_state()
+    original_rule=next(x['rule']['handle'] for x in original if 'rule' in x)
+    db.execute('UPDATE subnets SET expires=expires+600 WHERE network=?',(net,))
+    f.nft_sync(db,cfg)
+    assert next(x['rule']['handle'] for x in f.nft_state() if 'rule' in x)==original_rule
 message('/unban '+ip)
 assert m.overlaps(ip)
 message('/whitelist add '+ip)

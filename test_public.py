@@ -112,14 +112,15 @@ class PublicTests(unittest.TestCase):
             if args[0]=='ip': return '[]'
             commands.append(input_text)
             return ''
-        with patch.object(f,'run',side_effect=run), patch.object(f.subprocess,'run',return_value=types.SimpleNamespace(returncode=0)):
+        with patch.object(f,'run',side_effect=run), patch.object(f,'nft_state',return_value=None):
             with f.database() as db:
                 db.execute('INSERT INTO subnets VALUES (?,?,?)',('198.18.0.0/24',time.time(),time.time()+7200))
                 f.nft_sync(db,cfg)
         command=commands[0]
         self.assertIn('dport { 2222, 2200 }',command)
         self.assertIn('timeout ',command)
-        self.assertIn('delete table inet f2b_telegram_control',command)
+        self.assertIn('add table inet f2b_telegram_control',command)
+        self.assertNotIn('delete table',command)
         self.assertNotIn('flush ruleset',command)
         self.assertNotIn('f2b-table',command)
 
