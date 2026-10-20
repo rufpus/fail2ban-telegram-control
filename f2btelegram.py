@@ -2,6 +2,7 @@
 """Fail2ban Telegram worker. Python standard library only; secrets stay on server."""
 import argparse
 import contextlib
+import copy
 import datetime as dt
 import html
 import ipaddress
@@ -351,7 +352,7 @@ def nft_element(value):
     return str(ipaddress.IPv4Network(value, strict=True)), expires
 
 def nft_rule_matches(rule, ports):
-    expressions = [e for e in rule.get('expr', []) if 'counter' not in e]
+    expressions = [copy.deepcopy(e) for e in rule.get('expr', []) if 'counter' not in e]
     for expression in expressions:
         match = expression.get('match', {})
         if match.get('left') == {'payload': {'protocol':'tcp', 'field':'dport'}}:
@@ -476,6 +477,11 @@ def callback(cfg, cb):
         except ValueError as exc:
             return str(exc)[:CALLBACK_TEXT_LIMIT]
 
+def should_retry_delivery(exc, attempts):
+    """Pure classification; attempts counts already completed failed attempts."""
+    transient = isinstance(exc, APIError) and (exc.code == 'network' or isinstance(exc.code, int) and 500 <= exc.code < 600)
+    return transient and attempts + 1 < OUTBOX_MAX_ATTEMPTS
+
 def deliver_one(cfg):
     with database() as db:
         row = db.execute("SELECT * FROM outbox WHERE sent IS NULL AND status='pending' AND ready<=? ORDER BY id LIMIT 1", (time.time(),)).fetchone()
@@ -498,8 +504,7 @@ def deliver_one(cfg):
         result = api(cfg, 'sendMessage', chat_id=cfg['chat_id'], text=text, parse_mode='HTML', reply_markup={'inline_keyboard': keys})
     except (APIError, ValueError) as exc:
         with database() as db:
-            transient = isinstance(exc, APIError) and (exc.code == 'network' or isinstance(exc.code, int) and 500 <= exc.code < 600)
-            retry = transient and row['attempts'] + 1 < OUTBOX_MAX_ATTEMPTS
+            retry = should_retry_delivery(exc, row['attempts'])
             wait = max(getattr(exc, 'retry', 0), min(OUTBOX_BACKOFF_MAX_SECONDS, 2 ** min(row['attempts'] + 1, 8)))
             db.execute('UPDATE outbox SET attempts=attempts+1,ready=?,status=? WHERE id=?', (time.time() + wait, 'pending' if retry else 'failed', row['id']))
             if not retry and row['kind'] != 'dead_letter_notice':
