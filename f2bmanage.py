@@ -14,7 +14,7 @@ import f2btelegram as f
 from i18n import tr
 MAXTIME = 35 * 86400
 ADMIN_LOCK = threading.RLock()
-HELP = '<b>SSH / Fail2ban control</b>\n/status вЂ” service and notification queue\n/bans [page] вЂ” active IP and /24 bans\n/ip IP вЂ” IP status, whitelist and history\n/ban IP [duration] вЂ” ban an IP (default: 24h)\n/unban IP вЂ” remove an individual IP ban\n/bansubnet NETWORK [duration] вЂ” ban a /24 after confirmation\n/unbansubnet NETWORK вЂ” unban a /24 after confirmation\n/extend ADDRESS 7d вЂ” set expiry to 7 days from now\n/extend ADDRESS +7d вЂ” add 7 days to the current expiry\n/whitelist [page] вЂ” persistent whitelist\n/whitelist add IP_OR_CIDR вЂ” whitelist and unban\n/whitelist del IP_OR_CIDR вЂ” remove an entry (does not ban)\n/audit [page] вЂ” administration audit log\n/help вЂ” this help\n\nDuration: an integer followed by s, m, h, d or w; 1 second to 5 weeks.\nExamples: <code>/ban 203.0.113.8 7d</code>, <code>/bansubnet 203.0.113.0/24 2d</code>.\nIP commands run immediately. Subnet changes require confirmation.\nWhitelist networks: /24вЂ“/32. Banned networks: /24 only, TCP/{ports} only.\nRepeating a ban does not change its expiry. /extend without + can shorten it.\nOnly the sshd jail is managed. /unban does not remove a subnet ban.\nTimes use the configured timezone. Access is limited to the configured owner.'
+HELP = '<b>SSH / Fail2ban control</b>\n/status — service and notification queue\n/bans [page] — active IP and /24 bans\n/ip IP — IP status, whitelist and history\n/ban IP [duration] — ban an IP (default: 24h)\n/unban IP — remove an individual IP ban\n/bansubnet NETWORK [duration] — ban a /24 after confirmation\n/unbansubnet NETWORK — unban a /24 after confirmation\n/extend ADDRESS 7d — set expiry to 7 days from now\n/extend ADDRESS +7d — add 7 days to the current expiry\n/whitelist [page] — persistent whitelist\n/whitelist add IP_OR_CIDR — whitelist and unban\n/whitelist del IP_OR_CIDR — remove an entry (does not ban)\n/audit [page] — administration audit log\n/help — this help\n\nDuration: an integer followed by s, m, h, d or w; 1 second to 5 weeks.\nExamples: <code>/ban 203.0.113.8 7d</code>, <code>/bansubnet 203.0.113.0/24 2d</code>.\nIP commands run immediately. Subnet changes require confirmation.\nWhitelist networks: /24–/32. Banned networks: /24 only, TCP/{ports} only.\nRepeating a ban does not change its expiry. /extend without + can shorten it.\nOnly the sshd jail is managed. /unban does not remove a subnet ban.\nTimes use the configured timezone. Access is limited to the configured owner.'
 
 def engine(*args):
     from fail2ban.client.csocket import CSocket
@@ -331,13 +331,13 @@ def report(cfg, command, args):
     if page < 1:
         raise ValueError(tr('The page number must be positive.'))
     if command == '/bans':
-        entries = [r['ip'] + ' вЂ” ' + end_text(r['expires']) for r in sorted(state['bans'], key=lambda r: r['ip'])]
+        entries = [r['ip'] + ' — ' + end_text(r['expires']) for r in sorted(state['bans'], key=lambda r: r['ip'])]
         with f.database() as db:
-            entries += [r['network'] + tr(' (subnet) вЂ” ') + end_text(r['expires']) for r in db.execute('SELECT * FROM subnets WHERE expires>? ORDER BY network', (time.time(),))]
+            entries += [r['network'] + tr(' (subnet) — ') + end_text(r['expires']) for r in db.execute('SELECT * FROM subnets WHERE expires>? ORDER BY network', (time.time(),))]
         title = tr('Active sshd and subnet bans')
     elif command == '/whitelist':
         fixed = set(baseline(cfg))
-        entries = [n + (tr(' вЂ” mandatory protection') if n in fixed else tr(' вЂ” added through the bot')) for n in sorted(fixed | set(whitelist_networks()))]
+        entries = [n + (tr(' — mandatory protection') if n in fixed else tr(' — added through the bot')) for n in sorted(fixed | set(whitelist_networks()))]
         title = tr('Persistent sshd whitelist')
     else:
         with f.database() as db:
@@ -346,7 +346,7 @@ def report(cfg, command, args):
     pages = max(1, (len(entries) + 9) // 10)
     if page > pages:
         raise ValueError(tr('Total pages: ') + str(pages))
-    return html.escape(title + tr(' вЂ” page {v1}/{v3}\n', v1=page, v3=pages) + ('\n'.join(entries[(page - 1) * 10:page * 10]) or tr('No entries.')) + (tr('\nNext: {v1} {v3}', v1=command, v3=page + 1) if page < pages else ''))
+    return html.escape(title + tr(' — page {v1}/{v3}\n', v1=page, v3=pages) + ('\n'.join(entries[(page - 1) * 10:page * 10]) or tr('No entries.')) + (tr('\nNext: {v1} {v3}', v1=command, v3=page + 1) if page < pages else ''))
 
 def handle_message(cfg, msg):
     if msg.get('chat', {}).get('id') != cfg['chat_id'] or msg.get('from', {}).get('id') != cfg['user_id']:

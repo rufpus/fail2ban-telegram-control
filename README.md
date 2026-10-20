@@ -282,3 +282,10 @@ and non-documentation IPv4 addresses. Demo images are reproducible from
 
 [MIT](LICENSE) for this project's own code. Dependencies retain their respective
 licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
+
+Outbox: text exceeding 4096 UTF-16 units (including HTML markup) is rejected.
+Only network/HTTP 5xx failures retry with exponential backoff, at most 8 attempts.
+Other errors, including HTTP 400 and 429, and exhausted retries are retained with
+`status=failed` for diagnosis until the retention TTL. Inspect the service journal.
+TODO: choose between explicit manual replay and owner-approved replay of dead letters;
+no automatic replay is performed.

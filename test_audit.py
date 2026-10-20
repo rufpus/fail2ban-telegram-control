@@ -77,3 +77,39 @@ class AuditTests(unittest.TestCase):
             action.manage('deadline', '198.18.0.42', time.time()+3600)
         action._jail.database.addBan.assert_not_called()
         action._jail.actions._prolongBan.assert_called_once()
+
+    def test_outbox_rejects_oversize_before_insert(self):
+        with f.database() as db:
+            for text in ('x'*4097, '\U0001f600'*2049):
+                with self.assertRaisesRegex(ValueError, '4096'):
+                    f.queue(db, text)
+            self.assertEqual(db.execute('SELECT count(*) FROM outbox').fetchone()[0], 0)
+            f.queue(db, 'x'*4096)
+
+    def test_permanent_error_dead_letters_without_blocking_next_message(self):
+        with f.database() as db:
+            f.queue(db, 'bad')
+            f.queue(db, 'good')
+        with patch.object(f, 'api', side_effect=[f.APIError(400), {'message_id':1}]) as api:
+            self.assertFalse(f.deliver_one(self.cfg))
+            self.assertTrue(f.deliver_one(self.cfg))
+            self.assertFalse(f.deliver_one(self.cfg))
+        self.assertEqual(api.call_count, 2)
+        with f.database() as db:
+            self.assertEqual([r[0] for r in db.execute('SELECT status FROM outbox ORDER BY id')], ['failed','sent'])
+
+    def test_transient_errors_back_off_and_exhaust_attempts(self):
+        for code in ('network', 503):
+            with f.database() as db:
+                db.execute('DELETE FROM outbox')
+                f.queue(db, 'retry')
+            with patch.object(f, 'api', side_effect=f.APIError(code)) as api:
+                for attempt in range(f.OUTBOX_MAX_ATTEMPTS):
+                    before = time.time()
+                    self.assertFalse(f.deliver_one(self.cfg))
+                    with f.database() as db:
+                        row = db.execute('SELECT * FROM outbox').fetchone()
+                        self.assertGreaterEqual(row['ready'], before+min(300, 2**min(attempt+1,8)))
+                        db.execute('UPDATE outbox SET ready=0')
+                self.assertFalse(f.deliver_one(self.cfg))
+                self.assertEqual(api.call_count, f.OUTBOX_MAX_ATTEMPTS)

@@ -30,6 +30,8 @@ LOCK = threading.RLock()
 LOG = logging.getLogger('fail2ban-telegram-control')
 # Optional systemd Environment override; the JSON configuration stays unchanged.
 DEFAULT_RETENTION_DAYS = 30
+TELEGRAM_TEXT_LIMIT = 4096  # Conservative bound including HTML markup, in UTF-16 units.
+OUTBOX_MAX_ATTEMPTS = 8  # Bound recovery traffic during a prolonged outage.
 
 @contextlib.contextmanager
 def database():
@@ -50,6 +52,9 @@ def initialize():
         if 'created' not in {r['name'] for r in db.execute('PRAGMA table_info(outbox)')}:
             db.execute('ALTER TABLE outbox ADD COLUMN created REAL')
             db.execute('UPDATE outbox SET created=coalesce(sent,ready)')
+        if 'status' not in {r['name'] for r in db.execute('PRAGMA table_info(outbox)')}:
+            db.execute("ALTER TABLE outbox ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
+            db.execute("UPDATE outbox SET status='sent' WHERE sent IS NOT NULL")
 
 def number(value):
     return int(float(value))
@@ -109,12 +114,12 @@ def validate_config(cfg):
         raise ValueError('geoip must be true or false')
     ports = cfg['ssh_ports']
     if not isinstance(ports, list) or not ports or any(type(p) is not int or not 1 <= p <= 65535 for p in ports):
-        raise ValueError('ssh_ports must be a nonempty list of TCP port numbers (1вЂ“65535)')
+        raise ValueError('ssh_ports must be a nonempty list of TCP port numbers (1–65535)')
     cfg['ssh_ports'] = sorted(set(ports))
     cfg['protected'] = sorted({str(ipaddress.ip_network(n, strict=False)) for n in cfg.get('protected', [])})
     cfg.setdefault('server_name', socket.gethostname())
     if not isinstance(cfg['server_name'], str) or not 1 <= len(cfg['server_name']) <= 100:
-        raise ValueError('server_name must be a string of 1вЂ“100 characters')
+        raise ValueError('server_name must be a string of 1–100 characters')
     return cfg
 
 class APIError(Exception):
@@ -208,7 +213,12 @@ def button(db, kind, target, label, event_id=None, expires=None):
     return {'text': label, 'callback_data': token}
 
 def queue(db, text, buttons=None):
+    validate_message(text)
     db.execute('INSERT INTO outbox(text,buttons,ready,created) VALUES (?,?,?,?)', (text, json.dumps(buttons or []), time.time(), time.time()))
+
+def validate_message(text):
+    if len(text.encode('utf-16-le')) // 2 > TELEGRAM_TEXT_LIMIT:
+        raise ValueError('Message exceeds the Telegram 4096-character limit; request a smaller page or shorter text.')
 
 def prune_data(db, now=None):
     """Keep live bans and undelivered notifications even beyond the retention TTL."""
@@ -217,7 +227,7 @@ def prune_data(db, now=None):
         raise ValueError('F2BT_RETENTION_DAYS must be a positive integer')
     now = time.time() if now is None else now
     cutoff = now - days * 86400
-    db.execute('DELETE FROM outbox WHERE sent IS NOT NULL AND coalesce(created,sent,ready)<?', (cutoff,))
+    db.execute("DELETE FROM outbox WHERE (sent IS NOT NULL OR status='failed') AND coalesce(created,sent,ready)<?", (cutoff,))
     db.execute('DELETE FROM events WHERE started<? AND (ended IS NOT NULL OR (duration>=0 AND started+duration<=?)) AND NOT EXISTS (SELECT 1 FROM outbox WHERE event_id=events.id)', (cutoff, now))
     db.execute('DELETE FROM audit WHERE happened<?', (cutoff,))
     db.execute('DELETE FROM geo WHERE expires<?', (min(now, cutoff),))
@@ -339,7 +349,7 @@ def callback(cfg, cb):
 
 def deliver_one(cfg):
     with database() as db:
-        row = db.execute('SELECT * FROM outbox WHERE sent IS NULL AND ready<=? ORDER BY id LIMIT 1', (time.time(),)).fetchone()
+        row = db.execute("SELECT * FROM outbox WHERE sent IS NULL AND status='pending' AND ready<=? ORDER BY id LIMIT 1", (time.time(),)).fetchone()
     if not row:
         return False
     geo = {}
@@ -354,22 +364,26 @@ def deliver_one(cfg):
         else:
             text, keys = (row['text'], json.loads(row['buttons'] or '[]'))
     try:
+        # Structured events are rendered lazily to include the actual incremented bantime.
+        validate_message(text)
         result = api(cfg, 'sendMessage', chat_id=cfg['chat_id'], text=text, parse_mode='HTML', reply_markup={'inline_keyboard': keys})
-    except APIError as exc:
+    except (APIError, ValueError) as exc:
         with database() as db:
-            wait = max(exc.retry, min(300, 2 ** min(row['attempts'] + 1, 8)))
-            db.execute('UPDATE outbox SET attempts=attempts+1,ready=? WHERE id=?', (time.time() + wait, row['id']))
+            transient = isinstance(exc, APIError) and (exc.code == 'network' or isinstance(exc.code, int) and 500 <= exc.code < 600)
+            retry = transient and row['attempts'] + 1 < OUTBOX_MAX_ATTEMPTS
+            wait = max(getattr(exc, 'retry', 0), min(300, 2 ** min(row['attempts'] + 1, 8)))
+            db.execute('UPDATE outbox SET attempts=attempts+1,ready=?,status=? WHERE id=?', (time.time() + wait, 'pending' if retry else 'failed', row['id']))
             if row['event_id']:
                 for keyrow in keys:
                     for key in keyrow:
                         db.execute('DELETE FROM buttons WHERE token=?', (key['callback_data'],))
-            LOG.warning('Notification delivery delayed: %s', exc)
+            LOG.warning('Notification %s: %s', 'delayed' if retry else 'dead-lettered', exc)
         return False
     with database() as db:
         for keyrow in keys:
             for key in keyrow:
                 db.execute('UPDATE buttons SET message_id=? WHERE token=?', (result['message_id'], key['callback_data']))
-        db.execute('UPDATE outbox SET sent=?,message_id=? WHERE id=?', (time.time(), result['message_id'], row['id']))
+        db.execute("UPDATE outbox SET sent=?,message_id=?,status='sent' WHERE id=?", (time.time(), result['message_id'], row['id']))
     return True
 
 def maintenance(cfg):
