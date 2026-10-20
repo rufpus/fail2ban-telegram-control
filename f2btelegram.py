@@ -70,6 +70,9 @@ def initialize():
         if 'status' not in {r['name'] for r in db.execute('PRAGMA table_info(outbox)')}:
             db.execute("ALTER TABLE outbox ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
             db.execute("UPDATE outbox SET status='sent' WHERE sent IS NOT NULL")
+        if 'created' not in {r['name'] for r in db.execute('PRAGMA table_info(geo)')}:
+            db.execute('ALTER TABLE geo ADD COLUMN created REAL')
+            db.execute('UPDATE geo SET created=?', (time.time(),))
 
 def number(value):
     return int(float(value))
@@ -233,7 +236,7 @@ def geodata(ip):
     except (OSError, ValueError):
         pass
     with database() as db:
-        db.execute('INSERT OR REPLACE INTO geo VALUES (?,?,?)', (ip, json.dumps(data), time.time() + ttl))
+        db.execute('INSERT OR REPLACE INTO geo(ip,data,expires,created) VALUES (?,?,?,?)', (ip, json.dumps(data), time.time() + ttl, time.time()))
     return data
 
 def button(db, kind, target, label, event_id=None, expires=None):
@@ -259,7 +262,7 @@ def prune_data(db, now=None):
     db.execute("DELETE FROM outbox WHERE (sent IS NOT NULL OR status='failed') AND coalesce(created,sent,ready)<?", (cutoff,))
     db.execute('DELETE FROM events WHERE started<? AND (ended IS NOT NULL OR (duration>=0 AND started+duration<=?)) AND NOT EXISTS (SELECT 1 FROM outbox WHERE event_id=events.id)', (cutoff, now))
     db.execute('DELETE FROM audit WHERE happened<?', (cutoff,))
-    db.execute('DELETE FROM geo WHERE expires<?', (min(now, cutoff),))
+    db.execute('DELETE FROM geo WHERE expires<=? OR created<?', (now, cutoff))
 
 def render_event(db, row, cfg, geo):
     end = row['started'] + row['duration'] if row['duration'] >= 0 else float('inf')
@@ -499,6 +502,9 @@ def maintenance(cfg):
     last_error = None
     while True:
         try:
+            # Retention must work even while Fail2ban is unavailable.
+            with database() as db:
+                prune_data(db)
             sync_whitelist(cfg)
             with LOCK, database() as db:
                 expired = db.execute('SELECT * FROM subnets WHERE expires<=?', (time.time(),)).fetchall()
@@ -507,7 +513,6 @@ def maintenance(cfg):
                 for row in expired:
                     queue(db, tr('The ban on subnet <code>{v1}</code> expired and was removed.', v1=html.escape(row['network'])))
                 db.execute('DELETE FROM buttons WHERE (expires IS NOT NULL AND expires<?) OR used=1', (time.time() - 86400,))
-                prune_data(db)
             last_error = None
         except Exception as exc:
             LOG.exception('Firewall maintenance failed')

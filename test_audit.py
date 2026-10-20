@@ -61,15 +61,25 @@ class AuditTests(unittest.TestCase):
         with f.database() as db:
             db.execute('UPDATE outbox SET sent=?,created=? WHERE event_id IN (1,2)', (old, old))
             db.execute('INSERT INTO audit(happened) VALUES (?)', (old,))
-            db.execute('INSERT INTO geo VALUES (?,?,?)', ('198.18.0.1','{}',old))
+            db.execute('INSERT INTO geo VALUES (?,?,?,?)', ('198.18.0.1','{}',old,now))
+            db.execute('INSERT INTO geo VALUES (?,?,?,?)', ('198.18.0.2','{}',now+86400,old))
             with patch.dict(os.environ, {'F2BT_RETENTION_DAYS':'30'}):
                 f.prune_data(db, now)
+
             self.assertEqual([r['ip'] for r in db.execute('SELECT ip FROM events ORDER BY id')], ['198.18.0.2','198.18.0.3'])
             self.assertEqual(db.execute('SELECT count(*) FROM outbox').fetchone()[0], 1)
             self.assertEqual(db.execute('SELECT count(*) FROM audit').fetchone()[0], 0)
             self.assertEqual(db.execute('SELECT count(*) FROM geo').fetchone()[0], 0)
             with patch.dict(os.environ, {'F2BT_RETENTION_DAYS':'0'}), self.assertRaises(ValueError):
                 f.prune_data(db, now)
+
+    def test_maintenance_prunes_while_fail2ban_is_unavailable(self):
+        with f.database() as db:
+            db.execute('INSERT INTO audit(happened) VALUES (?)', (time.time()-40*86400,))
+        with patch.object(m, 'sync_whitelist', side_effect=RuntimeError('offline')), patch.object(f.time, 'sleep', side_effect=InterruptedError), self.assertLogs(f.LOG, level='ERROR'), self.assertRaises(InterruptedError):
+            f.maintenance(self.cfg)
+        with f.database() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM audit').fetchone()[0], 0)
 
     def test_extend_does_not_add_duplicate_ban_history(self):
         action, modules = load_action()

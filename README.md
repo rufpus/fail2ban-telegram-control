@@ -212,7 +212,7 @@ History begins at installation, not before it. History, audit and queue data are
 pruned after 30 days by the maintenance worker. Set `F2BT_RETENTION_DAYS`
 (a positive integer) with a systemd service Environment override to change this TTL.
 Live bans and pending notifications are retained until they can be safely removed.
-Expired geo cache entries are removed after the same retention interval. Protect backups. A previous
+Geo cache entries are removed when they expire or reach the retention TTL. Protect backups. A previous
 ban count in the bot is independent of Fail2ban's own database retention.
 
 Fail2ban 1.0.2 can remove Python actions during a jail reload. The integration
