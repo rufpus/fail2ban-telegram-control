@@ -295,3 +295,27 @@ survives restarts, and only one warning may be pending. Warning messages use the
 same bounded retry policy, but their own failure does not generate another warning.
 If Telegram remains unavailable, inspect the failed count in `/status` and the
 service journal after connectivity returns. A warning is not a delivery guarantee.
+
+### Real systemd validation
+
+CI has a separate Ubuntu 24.04 hosted-runner job with systemd as PID 1. It loads
+our production unit unchanged and adds only a CI `ExecStartPre` socket/database
+probe and `IPAddressDeny=any`. The actual worker entry point starts under the
+unit's `ProtectSystem`, capability and address-family restrictions. The probe
+uses the real Fail2ban socket and Python action, not a socket mock. A missing
+systemd causes a visible job failure. The Docker integration is a separate test;
+it does not emulate systemd sandbox enforcement.
+
+This checks service startup, not a VM reboot, Telegram delivery or every distro.
+On an installed Ubuntu server, verify the real environment after an upgrade:
+
+```bash
+sudo systemd-analyze verify /etc/systemd/system/fail2ban-telegram-control.service
+sudo systemctl restart fail2ban-telegram-control
+sudo systemctl is-active fail2ban-telegram-control
+sudo journalctl -u fail2ban-telegram-control --since '-5 minutes' --no-pager
+```
+
+Then send `/status` and `/ip 198.18.0.42`: both require the real socket. Repeat
+after a planned reboot to check boot ordering. Diagnose sandbox/socket failures
+in the journal; do not remove sandbox restrictions to hide a failing check.

@@ -302,3 +302,26 @@ TODO: выбрать ручной повтор dead-letter или повтор �
 Сводка имеет тот же лимит попыток, а её неудача не создаёт следующую сводку.
 При недоступном Telegram состояние видно в журнале и счётчике failed в `/status`
 после восстановления связи; гарантировать доставку самой сводки невозможно.
+
+### Проверка настоящего systemd-юнита
+
+Отдельный CI-job на Ubuntu 24.04 требует systemd в PID 1 и запускает штатный
+unit. Тестовый drop-in добавляет только `ExecStartPre` для доступа к настоящему
+сокету Fail2ban/Python-action и БД, а также `IPAddressDeny=any`: доставка Telegram
+здесь не проверяется. Основной процесс бота работает со штатными ограничениями
+ProtectSystem, capabilities и семейств адресов. Отсутствие systemd явно провалит
+job; Docker-интеграция сама по себе sandbox systemd не эмулирует.
+
+Это проверка запуска службы, а не перезагрузки VM или всех дистрибутивов.
+После обновления на своём Ubuntu-сервере выполните:
+
+```bash
+sudo systemd-analyze verify /etc/systemd/system/fail2ban-telegram-control.service
+sudo systemctl restart fail2ban-telegram-control
+sudo systemctl is-active fail2ban-telegram-control
+sudo journalctl -u fail2ban-telegram-control --since '-5 minutes' --no-pager
+```
+
+Затем отправьте `/status` и `/ip 198.18.0.42`: они проверяют реальный сокет.
+Повторите после плановой перезагрузки для проверки порядка запуска. Причину
+ошибок sandbox/сокета ищите в журнале, не отключая защиту службы.
