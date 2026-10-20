@@ -98,8 +98,7 @@ def config():
 
 def validate_config(cfg):
     cfg = dict(cfg)
-    if not re.fullmatch('\\d+:[A-Za-z0-9_-]{20,}', cfg.get('token', '')):
-        raise ValueError('Telegram token is not configured')
+    validate_token(cfg.get('token'))
     for field in ('chat_id', 'user_id'):
         if isinstance(cfg.get(field), bool) or not isinstance(cfg.get(field), int) or cfg[field] <= 0:
             raise ValueError('chat_id and user_id must be positive integer Telegram IDs')
@@ -121,6 +120,12 @@ def validate_config(cfg):
     if not isinstance(cfg['server_name'], str) or not 1 <= len(cfg['server_name']) <= 100:
         raise ValueError('server_name must be a string of 1–100 characters')
     return cfg
+
+def validate_token(token):
+    # BotFather tokens: positive ASCII bot ID and a 35-character URL-safe secret.
+    # getMe during setup additionally verifies that Telegram actually issued it.
+    if not isinstance(token, str) or not re.fullmatch(r'[1-9][0-9]*:[A-Za-z0-9_-]{35}', token):
+        raise ValueError('Invalid Telegram token: paste the complete BotFather token (positive numeric ID, colon, 35 URL-safe characters).')
 
 class APIError(Exception):
 

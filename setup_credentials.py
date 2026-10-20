@@ -59,6 +59,10 @@ def main():
     token = getpass.getpass('Bot token (hidden; Enter keeps the existing token): ').strip()
     if token:
         cfg['token'] = token
+    try:
+        f.validate_token(cfg.get('token'))
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
     cfg['chat_id'] = int(ask('Private Telegram chat ID: ', 'ID личного Telegram-чата: ', language))
     cfg['user_id'] = cfg['chat_id']
     geo = ask('Enable country/ISP lookup via ipwho.is? Banned IPs will be sent there [y/N]: ',

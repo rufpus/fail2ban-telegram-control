@@ -86,6 +86,14 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT count(*) FROM outbox').fetchone()[0], 0)
             f.queue(db, 'x'*4096)
 
+    def test_token_validation_rejects_malformed_values(self):
+        f.validate_token('123456:'+ 'X'*35)
+        for token in (None, 123, '0:'+ 'X'*35, '\u0661:'+ 'X'*35,
+                      '123:'+ 'X'*20, '123:'+ 'X'*36, '123:'+ 'X'*34+'!',
+                      '123:'+ 'X'*35+'\n'):
+            with self.subTest(token=token), self.assertRaisesRegex(ValueError, 'BotFather'):
+                f.validate_token(token)
+
     def test_event_dynamic_values_are_html_escaped(self):
         f.capture('<jail&>', dict(ip='198.18.0.42',time=time.time()-60,bantime=1,matches='<log&>'))
         with f.database() as db:
