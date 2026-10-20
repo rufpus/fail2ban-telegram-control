@@ -319,3 +319,20 @@ sudo journalctl -u fail2ban-telegram-control --since '-5 minutes' --no-pager
 Then send `/status` and `/ip 198.18.0.42`: both require the real socket. Repeat
 after a planned reboot to check boot ordering. Diagnose sandbox/socket failures
 in the journal; do not remove sandbox restrictions to hide a failing check.
+
+### `/extend` and Fail2ban restarts
+
+An individual IP's `/extend` deadline is changed in Fail2ban's in-memory ticket.
+The bot deliberately does not append another ban to `fail2ban.sqlite3`. Restarting
+the bot alone preserves the deadline while Fail2ban remains running. Restarting
+Fail2ban can restore the original recorded duration, or leave the IP unbanned if
+the original record has expired. An extension may therefore end earlier than the
+bot previously reported; a shortened ban may be restored for longer.
+
+The integration does not automatically re-ban an IP from its historical events:
+that could undo an intentional administrator unban or a changed whitelist/jail
+policy. After restarting Fail2ban, use `/ip IP` or `/bans` to read the actual live
+state, then repeat `/extend IP DURATION` if still banned, or explicitly `/ban IP
+DURATION` if needed. `/extend IP +DURATION` adds to the currently live deadline.
+Own `/24` bans are different: their deadlines are persisted in the integration's
+SQLite database and reconciled with nftables after a worker restart.
