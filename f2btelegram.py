@@ -32,6 +32,7 @@ LOG = logging.getLogger('fail2ban-telegram-control')
 DEFAULT_RETENTION_DAYS = 30
 TELEGRAM_TEXT_LIMIT = 4096  # Conservative bound including HTML markup, in UTF-16 units.
 OUTBOX_MAX_ATTEMPTS = 8  # Bound recovery traffic during a prolonged outage.
+DEAD_LETTER_NOTICE_INTERVAL = 300  # Aggregate owner warnings, at most once per five minutes.
 CAPTURE_SETTLE_SECONDS = 15  # Wait for asynchronous Fail2ban bantime increments.
 COMMAND_TIMEOUT_SECONDS = 15  # Bound local command execution.
 MAINTENANCE_INTERVAL_SECONDS = 15  # Reconcile state even without Telegram traffic.
@@ -73,6 +74,9 @@ def initialize():
         if 'created' not in {r['name'] for r in db.execute('PRAGMA table_info(geo)')}:
             db.execute('ALTER TABLE geo ADD COLUMN created REAL')
             db.execute('UPDATE geo SET created=?', (time.time(),))
+        if 'kind' not in {r['name'] for r in db.execute('PRAGMA table_info(outbox)')}:
+            db.execute("ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'message'")
+        db.execute("INSERT OR IGNORE INTO meta SELECT 'dead_letter_total', CAST(count(*) AS TEXT) FROM outbox WHERE status='failed' AND kind='message'")
 
 def number(value):
     return int(float(value))
@@ -244,9 +248,23 @@ def button(db, kind, target, label, event_id=None, expires=None):
     db.execute('INSERT INTO buttons(token,kind,target,event_id,expires) VALUES (?,?,?,?,?)', (token, kind, target, event_id, expires))
     return {'text': label, 'callback_data': token}
 
-def queue(db, text, buttons=None):
+def queue(db, text, buttons=None, *, kind='message'):
     validate_message(text)
-    db.execute('INSERT INTO outbox(text,buttons,ready,created) VALUES (?,?,?,?)', (text, json.dumps(buttons or []), time.time(), time.time()))
+    db.execute('INSERT INTO outbox(text,buttons,ready,created,kind) VALUES (?,?,?,?,?)', (text, json.dumps(buttons or []), time.time(), time.time(), kind))
+
+def notify_dead_letters(db, now=None):
+    """Persist the aggregate cursor atomically with one bounded, nonrecursive notice."""
+    now = time.time() if now is None else now
+    counters = dict(db.execute("SELECT key,value FROM meta WHERE key IN ('dead_letter_total','dead_letter_reported','dead_letter_next_notice')"))
+    total = int(counters.get('dead_letter_total', 0))
+    reported = int(counters.get('dead_letter_reported', 0))
+    if total <= reported or now < float(counters.get('dead_letter_next_notice', 0)):
+        return
+    if db.execute("SELECT 1 FROM outbox WHERE kind='dead_letter_notice' AND status='pending' LIMIT 1").fetchone():
+        return
+    failed = db.execute("SELECT count(*) FROM outbox WHERE status='failed'").fetchone()[0]
+    queue(db, tr('Delivery warning: {count} new notifications could not be delivered. Failed messages on disk: {failed}. Check /status and the service journal.', count=total-reported, failed=failed), kind='dead_letter_notice')
+    db.executemany('INSERT OR REPLACE INTO meta VALUES (?,?)', [('dead_letter_reported', str(total)), ('dead_letter_next_notice', str(now+DEAD_LETTER_NOTICE_INTERVAL))])
 
 def validate_message(text):
     if len(text.encode('utf-16-le')) // 2 > TELEGRAM_TEXT_LIMIT:
@@ -484,6 +502,8 @@ def deliver_one(cfg):
             retry = transient and row['attempts'] + 1 < OUTBOX_MAX_ATTEMPTS
             wait = max(getattr(exc, 'retry', 0), min(OUTBOX_BACKOFF_MAX_SECONDS, 2 ** min(row['attempts'] + 1, 8)))
             db.execute('UPDATE outbox SET attempts=attempts+1,ready=?,status=? WHERE id=?', (time.time() + wait, 'pending' if retry else 'failed', row['id']))
+            if not retry and row['kind'] != 'dead_letter_notice':
+                db.execute("UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='dead_letter_total'")
             if row['event_id']:
                 for keyrow in keys:
                     for key in keyrow:
@@ -504,6 +524,7 @@ def maintenance(cfg):
         try:
             # Retention must work even while Fail2ban is unavailable.
             with database() as db:
+                notify_dead_letters(db)
                 prune_data(db)
             sync_whitelist(cfg)
             with LOCK, database() as db:

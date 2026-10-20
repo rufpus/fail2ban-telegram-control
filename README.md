@@ -289,3 +289,9 @@ Other errors, including HTTP 400 and 429, and exhausted retries are retained wit
 `status=failed` for diagnosis until the retention TTL. Inspect the service journal.
 TODO: choose between explicit manual replay and owner-approved replay of dead letters;
 no automatic replay is performed.
+
+Dead-letter warnings are aggregated at most once every five minutes. The cursor
+survives restarts, and only one warning may be pending. Warning messages use the
+same bounded retry policy, but their own failure does not generate another warning.
+If Telegram remains unavailable, inspect the failed count in `/status` and the
+service journal after connectivity returns. A warning is not a delivery guarantee.

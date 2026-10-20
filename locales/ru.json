@@ -102,7 +102,6 @@
   "Remaining: ": "Осталось ",
   "; until ": "; до ",
   "Confirmation requested.": "Подтверждение запрошено.",
-  "Bot is running. Jail: sshd. SSH: TCP/{ports}.\nBanned IPs: {v1}. Subnets: {v3}.\nQueued notifications: {v5}.\nHelp: /help": "Бот работает. Jail: sshd. SSH: TCP/{ports}.\nБанов IP: {v1}. Подсетей: {v3}.\nУведомлений в очереди: {v5}.\nСправка: /help",
   "Usage: /ip IPv4": "Формат: /ip IPv4",
   "IP: {v1}\nIndividual ban: ": "IP: {v1}\nИндивидуальный бан: ",
   "none": "нет",
@@ -150,5 +149,7 @@
   "Unsupported sshd action port list; use explicit SSH TCP ports": "Неподдерживаемый список портов action sshd; укажите TCP-порты SSH явно",
   "Invalid sshd action port": "Некорректный порт action sshd",
   "The sshd jail must use nftables; its existing actions are preserved.": "Jail sshd должен использовать nftables; существующие action сохраняются.",
-  "sshd nftables action ports must match ssh_ports and use type=multiport. Update the jail and configuration, then run doctor.": "Порты nftables-action sshd должны совпадать с ssh_ports; требуется type=multiport. Обновите jail и конфигурацию, затем запустите doctor."
+  "sshd nftables action ports must match ssh_ports and use type=multiport. Update the jail and configuration, then run doctor.": "Порты nftables-action sshd должны совпадать с ssh_ports; требуется type=multiport. Обновите jail и конфигурацию, затем запустите doctor.",
+  "Delivery warning: {count} new notifications could not be delivered. Failed messages on disk: {failed}. Check /status and the service journal.": "Предупреждение доставки: не удалось отправить {count} новых уведомлений. Неудачных сообщений на диске: {failed}. Проверьте /status и журнал службы.",
+  "Bot is running. Jail: sshd. SSH: TCP/{ports}.\nBanned IPs: {v1}. Subnets: {v3}.\nQueued notifications: {v5}.\nFailed notifications: {failed}.\nHelp: /help": "Бот работает. Jail: sshd. SSH: TCP/{ports}.\nБанов IP: {v1}. Подсетей: {v3}.\nУведомлений в очереди: {v5}.\nНеудачных уведомлений: {failed}.\nСправка: /help"
 }
