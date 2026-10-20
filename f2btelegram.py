@@ -28,6 +28,8 @@ DEFAULT_SETTINGS = {'language': 'en', 'timezone': 'UTC', 'ssh_ports': [22], 'geo
 SETTINGS = dict(DEFAULT_SETTINGS)
 LOCK = threading.RLock()
 LOG = logging.getLogger('fail2ban-telegram-control')
+# Optional systemd Environment override; the JSON configuration stays unchanged.
+DEFAULT_RETENTION_DAYS = 30
 
 @contextlib.contextmanager
 def database():
@@ -45,6 +47,9 @@ def initialize():
         db.execute('PRAGMA journal_mode=WAL')
         db.executescript('\n        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);\n        CREATE TABLE IF NOT EXISTS events (\n          id INTEGER PRIMARY KEY, jail TEXT, ip TEXT, started REAL, duration INTEGER,\n          failures INTEGER, matches TEXT, ended REAL, previous_count INTEGER,\n          previous_time REAL, UNIQUE(jail,ip,started));\n        CREATE TABLE IF NOT EXISTS outbox (\n          id INTEGER PRIMARY KEY, event_id INTEGER UNIQUE, text TEXT, buttons TEXT,\n          ready REAL, sent REAL, message_id INTEGER, attempts INTEGER DEFAULT 0);\n        CREATE TABLE IF NOT EXISTS buttons (\n          token TEXT PRIMARY KEY, kind TEXT, target TEXT, event_id INTEGER,\n          message_id INTEGER, expires REAL, used INTEGER DEFAULT 0);\n        CREATE TABLE IF NOT EXISTS subnets (\n          network TEXT PRIMARY KEY, started REAL, expires REAL);\n        CREATE TABLE IF NOT EXISTS geo (\n          ip TEXT PRIMARY KEY, data TEXT, expires REAL);\n        CREATE TABLE IF NOT EXISTS whitelist (\n          network TEXT PRIMARY KEY, added REAL, user_id INTEGER);\n        CREATE TABLE IF NOT EXISTS admin_operations (\n          id TEXT PRIMARY KEY, payload TEXT, status TEXT, result TEXT, created REAL);\n        CREATE TABLE IF NOT EXISTS audit (\n          id INTEGER PRIMARY KEY, happened REAL, user_id INTEGER,\n          operation TEXT, target TEXT, result TEXT);\n        CREATE INDEX IF NOT EXISTS event_history ON events(ip,started);\n        CREATE INDEX IF NOT EXISTS pending_outbox ON outbox(ready,id) WHERE sent IS NULL;\n        ')
         db.execute("INSERT OR IGNORE INTO meta VALUES ('installed', ?)", (str(time.time()),))
+        if 'created' not in {r['name'] for r in db.execute('PRAGMA table_info(outbox)')}:
+            db.execute('ALTER TABLE outbox ADD COLUMN created REAL')
+            db.execute('UPDATE outbox SET created=coalesce(sent,ready)')
 
 def number(value):
     return int(float(value))
@@ -70,7 +75,7 @@ def capture(jail, info, operation='ban'):
             return
         history = db.execute('SELECT count(*), max(started) FROM events WHERE ip=?', (ip,)).fetchone()
         cur = db.execute('INSERT INTO events\n          (jail,ip,started,duration,failures,matches,previous_count,previous_time)\n          VALUES (?,?,?,?,?,?,?,?)', (jail, ip, started, number(info['bantime']), number(info.get('failures', 0)), str(info.get('matches', ''))[-12000:], *history))
-        db.execute('INSERT INTO outbox(event_id,ready) VALUES (?,?)', (cur.lastrowid, time.time() + 15))
+        db.execute('INSERT INTO outbox(event_id,ready,created) VALUES (?,?,?)', (cur.lastrowid, time.time() + 15, time.time()))
 
 def run(args, input_text=None):
     return subprocess.run(args, input=input_text, text=True, capture_output=True, check=True, timeout=15).stdout
@@ -203,7 +208,19 @@ def button(db, kind, target, label, event_id=None, expires=None):
     return {'text': label, 'callback_data': token}
 
 def queue(db, text, buttons=None):
-    db.execute('INSERT INTO outbox(text,buttons,ready) VALUES (?,?,?)', (text, json.dumps(buttons or []), time.time()))
+    db.execute('INSERT INTO outbox(text,buttons,ready,created) VALUES (?,?,?,?)', (text, json.dumps(buttons or []), time.time(), time.time()))
+
+def prune_data(db, now=None):
+    """Keep live bans and undelivered notifications even beyond the retention TTL."""
+    days = int(os.environ.get('F2BT_RETENTION_DAYS', DEFAULT_RETENTION_DAYS))
+    if days <= 0:
+        raise ValueError('F2BT_RETENTION_DAYS must be a positive integer')
+    now = time.time() if now is None else now
+    cutoff = now - days * 86400
+    db.execute('DELETE FROM outbox WHERE sent IS NOT NULL AND coalesce(created,sent,ready)<?', (cutoff,))
+    db.execute('DELETE FROM events WHERE started<? AND (ended IS NOT NULL OR (duration>=0 AND started+duration<=?)) AND NOT EXISTS (SELECT 1 FROM outbox WHERE event_id=events.id)', (cutoff, now))
+    db.execute('DELETE FROM audit WHERE happened<?', (cutoff,))
+    db.execute('DELETE FROM geo WHERE expires<?', (min(now, cutoff),))
 
 def render_event(db, row, cfg, geo):
     end = row['started'] + row['duration'] if row['duration'] >= 0 else float('inf')
@@ -368,6 +385,7 @@ def maintenance(cfg):
                 for row in expired:
                     queue(db, tr('The ban on subnet <code>{v1}</code> expired and was removed.', v1=row['network']))
                 db.execute('DELETE FROM buttons WHERE (expires IS NOT NULL AND expires<?) OR used=1', (time.time() - 86400,))
+                prune_data(db)
             last_error = None
         except Exception as exc:
             LOG.exception('Firewall maintenance failed')

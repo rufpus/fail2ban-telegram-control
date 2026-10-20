@@ -28,7 +28,9 @@ privileged administration tool; those restrictions do not make it unprivileged.
   Tokens and log lines are not sent to that provider. Lookups are disabled by
   default; cached answers do not remove the provider's independent retention.
 - SQLite stores history, pending messages, buttons, operation intents and audit
-  records locally. These survive restarts and are not automatically pruned.
+  records locally. These survive restarts. Events, audit records, expired geo cache and completed
+  notifications have a default 30-day TTL (`F2BT_RETENTION_DAYS`); live bans and
+  pending notifications are preserved. Backups have independent retention.
   Monitor disk use and protect backups.
 - There is no project telemetry or analytics endpoint.
 

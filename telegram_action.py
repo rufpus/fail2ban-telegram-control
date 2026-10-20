@@ -69,8 +69,7 @@ class Action(ActionBase):
                         raise ValueError('IP is not banned')
                     ticket.setBanTime(float(deadline)-ticket.getTime())
                     manager._nextUnbanTime = min(manager._nextUnbanTime, float(deadline))
-                if self._jail.database is not None:
-                    self._jail.database.addBan(self._jail, ticket)
+                # Extending an existing ticket is not another ban-history event.
                 actions._prolongBan(ticket)
             return next(r for r in self.snapshot()['bans'] if r['ip'] == ip)
 
