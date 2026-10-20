@@ -108,7 +108,7 @@ class AuditTests(unittest.TestCase):
         state = [
             {'chain':{'name':'input','type':'filter','hook':'input','prio':-2,'policy':'accept'}},
             {'set':{'name':'subnets','type':'ipv4_addr','flags':['interval','timeout'],
-                    'elem':[{'elem':{'val':{'prefix':{'addr':'198.18.0.0','len':24}},'expires':3600000}}]}},
+                    'elem':[{'elem':{'val':{'prefix':{'addr':'198.18.0.0','len':24}},'expires':3599}}]}},
             {'rule':{'chain':'input','handle':7,'expr':[
                 {'match':{'op':'==','left':{'payload':{'protocol':'tcp','field':'dport'}},'right':22}},
                 {'match':{'op':'==','left':{'payload':{'protocol':'ip','field':'saddr'}},'right':'@subnets'}},

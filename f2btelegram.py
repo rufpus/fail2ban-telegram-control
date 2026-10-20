@@ -305,12 +305,12 @@ def safe_network(cfg, network):
             raise ValueError(tr('The subnet overlaps a protected address or network: ') + item)
     return str(net)
 
-NFT_EXPIRY_TOLERANCE_SECONDS = 2  # nft JSON milliseconds and command latency.
+NFT_EXPIRY_TOLERANCE_SECONDS = 2  # nft JSON rounds seconds; allow command latency.
 NFT_TABLE = 'inet f2b_telegram_control'  # Only the integration-owned table.
 
 def nft_state():
     result = subprocess.run(['nft', '-j', 'list', 'table', 'inet', 'f2b_telegram_control'],
-                            capture_output=True, text=True, timeout=10)
+                            capture_output=True, text=True, timeout=10, env={**os.environ, 'LC_ALL':'C'})
     if result.returncode:
         if 'No such file or directory' in result.stderr:
             return None
@@ -380,7 +380,7 @@ def nft_sync(db, cfg):
                 current.update(nft_element(e) for e in element.get('elem', []))
         read_at = time.time()
         changed = {net for net in current.keys() & desired.keys() if current[net] is None or
-                   abs(desired[net]-read_at-current[net]/1000) > NFT_EXPIRY_TOLERANCE_SECONDS}
+                   abs(desired[net]-read_at-current[net]) > NFT_EXPIRY_TOLERANCE_SECONDS}
         for net in sorted((current.keys()-desired.keys()) | changed):
             commands.append('delete element ' + NFT_TABLE + ' subnets { ' + net + ' }')
         for net in sorted((desired.keys()-current.keys()) | changed):
