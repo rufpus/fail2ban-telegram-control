@@ -6,7 +6,7 @@ import threading
 import time
 sys.path.insert(0, '/opt/fail2ban-telegram-control')
 from fail2ban.server.action import ActionBase
-from f2btelegram import capture
+from f2btelegram import capture, MAX_BAN_SECONDS, DEADLINE_GRACE_SECONDS
 
 
 class Action(ActionBase):
@@ -43,7 +43,7 @@ class Action(ActionBase):
             for ignored in self.snapshot()['ignored']:
                 if ipaddress.ip_address(ip) in ipaddress.ip_network(ignored, strict=False):
                     raise ValueError('Address is whitelisted')
-            if deadline is None or not 0 < float(deadline)-time.time() <= 3024001:
+            if deadline is None or not 0 < float(deadline)-time.time() <= MAX_BAN_SECONDS + DEADLINE_GRACE_SECONDS:
                 raise ValueError('Invalid deadline')
         with self._admin_lock:
             actions = self._jail.actions

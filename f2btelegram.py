@@ -32,6 +32,17 @@ LOG = logging.getLogger('fail2ban-telegram-control')
 DEFAULT_RETENTION_DAYS = 30
 TELEGRAM_TEXT_LIMIT = 4096  # Conservative bound including HTML markup, in UTF-16 units.
 OUTBOX_MAX_ATTEMPTS = 8  # Bound recovery traffic during a prolonged outage.
+CAPTURE_SETTLE_SECONDS = 15  # Wait for asynchronous Fail2ban bantime increments.
+COMMAND_TIMEOUT_SECONDS = 15  # Bound local command execution.
+MAINTENANCE_INTERVAL_SECONDS = 15  # Reconcile state even without Telegram traffic.
+CONFIRMATION_TTL_SECONDS = 120  # Short-lived destructive-action confirmation.
+OUTBOX_BACKOFF_MAX_SECONDS = 300  # Upper retry delay during an outage.
+COMMAND_MAX_AGE_SECONDS = 300  # Reject commands delayed by Telegram outages.
+MAX_BAN_SECONDS = 35 * 86400  # Match the configured five-week safety cap.
+DEADLINE_GRACE_SECONDS = 1  # Allow clock movement across the Fail2ban socket.
+CALLBACK_TEXT_LIMIT = 190  # Leave room below Telegram's 200-character alert limit.
+CAPTURE_LOG_LIMIT = 12000  # Bound log storage per Fail2ban event.
+TIME_TOLERANCE_SECONDS = 0.01  # Ignore timestamp serialization round-off.
 
 @contextlib.contextmanager
 def database():
@@ -79,11 +90,11 @@ def capture(jail, info, operation='ban'):
         if operation == 'prolong':
             return
         history = db.execute('SELECT count(*), max(started) FROM events WHERE ip=?', (ip,)).fetchone()
-        cur = db.execute('INSERT INTO events\n          (jail,ip,started,duration,failures,matches,previous_count,previous_time)\n          VALUES (?,?,?,?,?,?,?,?)', (jail, ip, started, number(info['bantime']), number(info.get('failures', 0)), str(info.get('matches', ''))[-12000:], *history))
-        db.execute('INSERT INTO outbox(event_id,ready,created) VALUES (?,?,?)', (cur.lastrowid, time.time() + 15, time.time()))
+        cur = db.execute('INSERT INTO events\n          (jail,ip,started,duration,failures,matches,previous_count,previous_time)\n          VALUES (?,?,?,?,?,?,?,?)', (jail, ip, started, number(info['bantime']), number(info.get('failures', 0)), str(info.get('matches', ''))[-CAPTURE_LOG_LIMIT:], *history))
+        db.execute('INSERT INTO outbox(event_id,ready,created) VALUES (?,?,?)', (cur.lastrowid, time.time() + CAPTURE_SETTLE_SECONDS, time.time()))
 
 def run(args, input_text=None):
-    return subprocess.run(args, input=input_text, text=True, capture_output=True, check=True, timeout=15).stdout
+    return subprocess.run(args, input=input_text, text=True, capture_output=True, check=True, timeout=COMMAND_TIMEOUT_SECONDS).stdout
 
 def config():
     cfg = validate_config(json.loads(CONFIG.read_text(encoding='utf-8')))
@@ -330,7 +341,7 @@ def callback(cfg, cb):
                 return tr('This subnet is already unbanned.')
             if kind.startswith('request_'):
                 action = 'ban' if kind == 'request_ban' else 'unban'
-                expires = time.time() + 120
+                expires = time.time() + CONFIRMATION_TTL_SECONDS
                 keys = [[button(db, 'confirm_' + action, net, tr('Confirm'), item['event_id'], expires), button(db, 'cancel', net, tr('Cancel'), expires=expires)]]
                 text = tr('Confirm banning <code>{v1}</code> for 24 hours, TCP/{ports} only.', v1=html.escape(net)) if action == 'ban' else tr('Confirm unbanning <code>{v1}</code>. Individual IP bans will remain.', v1=html.escape(net))
                 queue(db, text + tr('\nThis confirmation expires in 2 minutes.'), keys)
@@ -350,7 +361,7 @@ def callback(cfg, cb):
             db.execute('UPDATE buttons SET used=1 WHERE message_id=?', (item['message_id'],))
             return tr('Done.')
         except ValueError as exc:
-            return str(exc)[:190]
+            return str(exc)[:CALLBACK_TEXT_LIMIT]
 
 def deliver_one(cfg):
     with database() as db:
@@ -376,7 +387,7 @@ def deliver_one(cfg):
         with database() as db:
             transient = isinstance(exc, APIError) and (exc.code == 'network' or isinstance(exc.code, int) and 500 <= exc.code < 600)
             retry = transient and row['attempts'] + 1 < OUTBOX_MAX_ATTEMPTS
-            wait = max(getattr(exc, 'retry', 0), min(300, 2 ** min(row['attempts'] + 1, 8)))
+            wait = max(getattr(exc, 'retry', 0), min(OUTBOX_BACKOFF_MAX_SECONDS, 2 ** min(row['attempts'] + 1, 8)))
             db.execute('UPDATE outbox SET attempts=attempts+1,ready=?,status=? WHERE id=?', (time.time() + wait, 'pending' if retry else 'failed', row['id']))
             if row['event_id']:
                 for keyrow in keys:
@@ -412,7 +423,7 @@ def maintenance(cfg):
                 with database() as db:
                     queue(db, tr('Subnet firewall maintenance failed. Check the fail2ban-telegram-control service on the server.'))
             last_error = time.time()
-        time.sleep(15)
+        time.sleep(MAINTENANCE_INTERVAL_SECONDS)
 
 def sender(cfg):
     while True:

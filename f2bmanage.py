@@ -12,8 +12,9 @@ import threading
 import time
 import f2btelegram as f
 from i18n import tr
-MAXTIME = 35 * 86400
+MAXTIME = f.MAX_BAN_SECONDS
 ADMIN_LOCK = threading.RLock()
+AUDIT_RESULT_PREVIEW_LIMIT = 120  # Keep audit report pages within Telegram limits.
 HELP = '<b>SSH / Fail2ban control</b>\n/status — service and notification queue\n/bans [page] — active IP and /24 bans\n/ip IP — IP status, whitelist and history\n/ban IP [duration] — ban an IP (default: 24h)\n/unban IP — remove an individual IP ban\n/bansubnet NETWORK [duration] — ban a /24 after confirmation\n/unbansubnet NETWORK — unban a /24 after confirmation\n/extend ADDRESS 7d — set expiry to 7 days from now\n/extend ADDRESS +7d — add 7 days to the current expiry\n/whitelist [page] — persistent whitelist\n/whitelist add IP_OR_CIDR — whitelist and unban\n/whitelist del IP_OR_CIDR — remove an entry (does not ban)\n/audit [page] — administration audit log\n/help — this help\n\nDuration: an integer followed by s, m, h, d or w; 1 second to 5 weeks.\nExamples: <code>/ban 203.0.113.8 7d</code>, <code>/bansubnet 203.0.113.0/24 2d</code>.\nIP commands run immediately. Subnet changes require confirmation.\nWhitelist networks: /24–/32. Banned networks: /24 only, TCP/{ports} only.\nRepeating a ban does not change its expiry. /extend without + can shorten it.\nOnly the sshd jail is managed. /unban does not remove a subnet ban.\nTimes use the configured timezone. Access is limited to the configured owner.'
 
 def engine(*args):
@@ -135,7 +136,7 @@ def refresh_active_events(state):
             seconds = row.get('duration')
             if seconds is None:
                 seconds = row['expires'] - row['started'] if row['expires'] is not None else -1
-            db.execute("UPDATE events SET ended=NULL,duration=?\n                WHERE jail='sshd' AND ip=? AND abs(started-?)<0.01", (int(seconds), row['ip'], row['started']))
+            db.execute("UPDATE events SET ended=NULL,duration=?\n                WHERE jail='sshd' AND ip=? AND abs(started-?)<?", (int(seconds), row['ip'], row['started'], f.TIME_TOLERANCE_SECONDS))
 
 def parse_seconds(text):
     found = re.fullmatch('([1-9][0-9]{0,8})([smhdw])', text.lower())
@@ -176,7 +177,7 @@ def new_deadline(now, spec, old=None):
     if additive and old is None:
         raise ValueError(tr('Cannot add a duration to a permanent ban.'))
     result = (old if additive else now) + seconds
-    if result - now > MAXTIME + 0.01:
+    if result - now > MAXTIME + f.TIME_TOLERANCE_SECONDS:
         raise ValueError(tr('The remaining duration after this change cannot exceed 5 weeks.'))
     return result
 
@@ -228,7 +229,7 @@ def apply(cfg, payload):
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT * FROM subnets WHERE network=? AND expires>?', (target, time.time())).fetchone()
             if op == 'subnet_unban':
-                if row and payload.get('expected') and (abs(row['expires'] - payload['expected']) > 0.01):
+                if row and payload.get('expected') and (abs(row['expires'] - payload['expected']) > f.TIME_TOLERANCE_SECONDS):
                     raise ValueError(tr('The subnet ban changed after this request. Repeat the command.'))
                 db.execute('DELETE FROM subnets WHERE network=?', (target,))
             else:
@@ -241,7 +242,7 @@ def apply(cfg, payload):
                     if not row:
                         raise ValueError(tr('This subnet is no longer banned.'))
                     expected = payload.get('expected')
-                    if expected and abs(row['expires'] - expected) > 0.01:
+                    if expected and abs(row['expires'] - expected) > f.TIME_TOLERANCE_SECONDS:
                         raise ValueError(tr('The expiry changed after this request. Repeat the command.'))
                     db.execute('UPDATE subnets SET expires=? WHERE network=?', (payload['deadline'], target))
                 else:
@@ -266,7 +267,7 @@ def apply(cfg, payload):
         conflicts = overlaps(target)
         approved = payload.get('conflicts', {})
         for row in conflicts:
-            if row['network'] not in approved or abs(row['expires'] - approved[row['network']]) > 0.01:
+            if row['network'] not in approved or abs(row['expires'] - approved[row['network']]) > f.TIME_TOLERANCE_SECONDS:
                 raise ValueError(tr('A new or changed subnet ban overlaps this entry. Repeat the command to confirm it.'))
         with f.LOCK, f.database() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -285,7 +286,7 @@ def request_confirmation(cfg, opid, payload, text):
     with f.database() as db:
         if db.execute('SELECT 1 FROM admin_operations WHERE id=?', (opid,)).fetchone():
             return
-        expires = time.time() + 120
+        expires = time.time() + f.CONFIRMATION_TTL_SECONDS
         keys = [[f.button(db, 'admin', json.dumps(payload), tr('Confirm'), expires=expires), f.button(db, 'cancel', '', tr('Cancel'), expires=expires)]]
         f.queue(db, html.escape(text) + tr('\nThis confirmation expires in 2 minutes.'), keys)
         db.execute('INSERT INTO admin_operations VALUES (?,?,?,?,?)', (opid, json.dumps(payload), 'confirmation', tr('Confirmation requested.'), time.time()))
@@ -305,7 +306,7 @@ def confirm(cfg, cb):
         result = execute(cfg, 'callback:' + row['token'], payload)
         with f.database() as db:
             db.execute('UPDATE buttons SET used=1 WHERE message_id=?', (row['message_id'],))
-        return result[:190]
+        return result[:f.CALLBACK_TEXT_LIMIT]
 
 def report(cfg, command, args):
     state = snapshot()
@@ -341,7 +342,7 @@ def report(cfg, command, args):
         title = tr('Persistent sshd whitelist')
     else:
         with f.database() as db:
-            entries = [f.stamp(r['happened']) + f' | user {r['user_id']} | {r['operation']} {r['target']} | ' + r['result'][:120] for r in db.execute('SELECT * FROM audit ORDER BY id DESC')]
+            entries = [f.stamp(r['happened']) + f' | user {r['user_id']} | {r['operation']} {r['target']} | ' + r['result'][:AUDIT_RESULT_PREVIEW_LIMIT] for r in db.execute('SELECT * FROM audit ORDER BY id DESC')]
         title = tr('Administration audit log')
     pages = max(1, (len(entries) + 9) // 10)
     if page > pages:
@@ -351,7 +352,7 @@ def report(cfg, command, args):
 def handle_message(cfg, msg):
     if msg.get('chat', {}).get('id') != cfg['chat_id'] or msg.get('from', {}).get('id') != cfg['user_id']:
         return
-    if time.time() - msg.get('date', time.time()) > 300:
+    if time.time() - msg.get('date', time.time()) > f.COMMAND_MAX_AGE_SECONDS:
         if msg.get('text', '').startswith('/'):
             reply(tr('This command is older than 5 minutes and was not executed. Send it again.'))
         return
