@@ -118,8 +118,10 @@ def sync_whitelist(cfg):
         runtime = set(runtime_names)
         for net in set(desired) - runtime:
             engine('set', 'sshd', 'addignoreip', net)
-        for net in prior - set(desired) & runtime:
-            engine('set', 'sshd', 'delignoreip', runtime_names[net])
+        for net in (prior - set(desired)) & runtime:
+            name = runtime_names.get(net)
+            if name is not None:
+                engine('set', 'sshd', 'delignoreip', name)
         for row in state['bans']:
             address = ips.ip_address(row['ip'])
             if any((address in ips.ip_network(n, strict=False) for n in desired)):

@@ -183,6 +183,16 @@ class ManagementTests(unittest.TestCase):
         self.assertNotIn('198.18.0.42', self.ignored)
         self.assertNotIn('198.18.0.42/32', m.whitelist_networks())
 
+    def test_whitelist_removal_after_reload_clears_runtime_ignoreip(self):
+        self.message('/whitelist add 198.18.0.42')
+        self.assertIn('198.18.0.42/32', self.ignored)
+        self.ignored.clear()  # Fail2ban reload lost the runtime ignoreip list.
+        self.message('/whitelist del 198.18.0.42')
+        self.assertNotIn('198.18.0.42/32', m.whitelist_networks())
+        self.assertNotIn('198.18.0.42/32', self.ignored)
+        with f.database() as db:
+            self.assertEqual(db.execute('SELECT status FROM admin_operations ORDER BY created DESC LIMIT 1').fetchone()[0], 'done')
+
     def test_live_tickets_correct_reload_unban_markers(self):
         started = time.time()
         f.capture('sshd',dict(ip='198.18.0.42',time=started,bantime=86400,restored=0))
