@@ -86,6 +86,12 @@ class ManagementTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.new_deadline(1000, '+1d', 1000+m.MAXTIME)
 
+    def test_operation_failure_logs_traceback(self):
+        with patch.object(m, 'apply', side_effect=RuntimeError('test failure')), self.assertLogs(f.LOG, level='ERROR') as logs:
+            m.execute(self.cfg, 'test:failure', {'op':'unban', 'target':'198.18.0.42'})
+        self.assertIsNotNone(logs.records[0].exc_info)
+        self.assertIn('RuntimeError: test failure', logs.output[0])
+
     def test_baseline_normalizes_bare_ip_and_host_cidr(self):
         with f.database() as db:
             db.execute("INSERT OR REPLACE INTO meta VALUES ('baseline_ignores',?)",

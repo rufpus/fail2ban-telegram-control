@@ -104,12 +104,12 @@ def validate_config(cfg):
         raise ValueError('geoip must be true or false')
     ports = cfg['ssh_ports']
     if not isinstance(ports, list) or not ports or any(type(p) is not int or not 1 <= p <= 65535 for p in ports):
-        raise ValueError('ssh_ports must be a nonempty list of TCP port numbers (1–65535)')
+        raise ValueError('ssh_ports must be a nonempty list of TCP port numbers (1вЂ“65535)')
     cfg['ssh_ports'] = sorted(set(ports))
     cfg['protected'] = sorted({str(ipaddress.ip_network(n, strict=False)) for n in cfg.get('protected', [])})
     cfg.setdefault('server_name', socket.gethostname())
     if not isinstance(cfg['server_name'], str) or not 1 <= len(cfg['server_name']) <= 100:
-        raise ValueError('server_name must be a string of 1–100 characters')
+        raise ValueError('server_name must be a string of 1вЂ“100 characters')
     return cfg
 
 class APIError(Exception):
@@ -370,7 +370,7 @@ def maintenance(cfg):
                 db.execute('DELETE FROM buttons WHERE (expires IS NOT NULL AND expires<?) OR used=1', (time.time() - 86400,))
             last_error = None
         except Exception as exc:
-            LOG.error('Firewall maintenance failed: %s', type(exc).__name__)
+            LOG.exception('Firewall maintenance failed')
             if last_error is None:
                 with database() as db:
                     queue(db, tr('Subnet firewall maintenance failed. Check the fail2ban-telegram-control service on the server.'))
@@ -382,7 +382,7 @@ def sender(cfg):
         try:
             delivered = deliver_one(cfg)
         except Exception as exc:
-            LOG.error('Outbox processing failed: %s', type(exc).__name__)
+            LOG.exception('Outbox processing failed')
             delivered = False
         time.sleep(1.1 if delivered else 3)
 
@@ -424,7 +424,7 @@ def serve():
                     try:
                         text = callback(cfg, cb)
                     except Exception as exc:
-                        LOG.error('Callback failed: %s', type(exc).__name__)
+                        LOG.exception('Callback failed')
                         text = tr('Operation failed. Check the service on the server.')
                         with database() as db:
                             queue(db, tr('The subnet operation failed. Check the fail2ban-telegram-control journal on the server.'))
@@ -439,8 +439,12 @@ def serve():
                     db.execute("INSERT OR REPLACE INTO meta VALUES ('offset',?)", (str(update['update_id'] + 1),))
             delay = 2
         except APIError as exc:
-            LOG.warning('Telegram polling delayed: %s', exc)
+            LOG.exception('Telegram polling delayed')
             time.sleep(max(delay, exc.retry))
+            delay = min(60, delay * 2)
+        except Exception:
+            LOG.exception('Telegram polling failed')
+            time.sleep(delay)
             delay = min(60, delay * 2)
 
 def main():
